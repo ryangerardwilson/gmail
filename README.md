@@ -150,7 +150,7 @@ gmail 1 r "18f3abc..." "Adding context." -cc "manager@example.com" -bcc "audit@e
 gmail 1 r "18f3abc..." "Sharing the latest." -atch "/tmp/project_dir"
 gmail 1 r -a "18f3abc..." "Please review." -atch "/tmp/notes.txt" "/tmp/project_dir"
 gmail 1 r -t "19ca756c06a7ebcd" "Following up on this thread."
-gmail 1 r -ta "19ca756c06a7ebcd" "Thanks all."
+gmail 1 r -t -a "19ca756c06a7ebcd" "Thanks all."
 
 # Spam flow
 gmail 1 si
@@ -168,12 +168,12 @@ gmail 1 cn -e
 Reply flags:
 - `-a`: reply-all, keeps original Cc recipients (excluding your own address).
 - `-t`: treat target id as `thread_id` instead of `message_id`.
-- You can combine as `-ta` or `-at`.
+- Use separate flags only (for example: `r -t -a ...` or `r -a -t ...`).
 - `-cc`: add comma-separated recipients to Cc for send/reply (trailing option, after required args).
 - `-bcc`: add comma-separated recipients to Bcc for send/reply (trailing option, after required args).
 - `-atch`: attach one or more file/dir paths; directories are attached as generated `.zip` files (trailing option, after required args).
 - `s -e`: open your editor (`$VISUAL`, then `$EDITOR`, else `vim`) with a compose template and send from filled fields.
-- `r -e`: open your editor for reply body/CC/BCC/Attachments (target id stays on CLI). Works with `-a`, `-t`, `-at`, `-ta`.
+- `r -e`: open your editor for reply body/CC/BCC/Attachments (target id stays on CLI). Works with separate `-a` and/or `-t` flags.
 - Editor template supports `Attachments: "path1,path2,path3"` (comma-separated file/dir paths).
 
 Spam flow commands:

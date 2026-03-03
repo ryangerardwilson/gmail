@@ -17,10 +17,11 @@ def _decode_raw(raw: str):
 
 
 class ReplyParsingTests(unittest.TestCase):
-    def test_parse_reply_args_clustered_flags(self) -> None:
+    def test_parse_reply_args_separate_flags(self) -> None:
         use_thread, reply_all, use_editor, target_id, body, cc_emails, bcc_emails, attachment_paths = _parse_reply_args(
             [
-                "-ta",
+                "-t",
+                "-a",
                 "thread123",
                 "hello",
                 "-cc",
@@ -60,7 +61,7 @@ class ReplyParsingTests(unittest.TestCase):
 
     def test_parse_reply_args_editor_mode(self) -> None:
         use_thread, reply_all, use_editor, target_id, body, cc_emails, bcc_emails, attachment_paths = _parse_reply_args(
-            ["-ae", "msg123", "-cc", "x@example.com"]
+            ["-a", "-e", "msg123", "-cc", "x@example.com"]
         )
         self.assertFalse(use_thread)
         self.assertTrue(reply_all)
@@ -70,6 +71,12 @@ class ReplyParsingTests(unittest.TestCase):
         self.assertEqual(cc_emails, ["x@example.com"])
         self.assertEqual(bcc_emails, [])
         self.assertEqual(attachment_paths, [])
+
+    def test_parse_reply_args_rejects_combined_flags(self) -> None:
+        with self.assertRaises(UsageError):
+            _parse_reply_args(["-ta", "thread123", "hello"])
+        with self.assertRaises(UsageError):
+            _parse_reply_args(["-ae", "msg123"])
 
 
 class SendParsingTests(unittest.TestCase):

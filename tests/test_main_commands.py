@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
-from gmail_cli.errors import UsageError
+from gmail_cli.errors import ApiError, UsageError
 from main import (
     _handle_delete,
     _handle_list,
@@ -93,6 +93,18 @@ class MainCommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         send_mock.assert_not_called()
 
+    def test_handle_send_editor_mode_failure_prints_draft(self) -> None:
+        service = MagicMock()
+        with patch(
+            "main._open_editor_template",
+            return_value=("to@example.com", "Subject", "Body", [], [], []),
+        ), patch("main.send_email", side_effect=ApiError("boom")), patch("main.print") as print_mock:
+            with self.assertRaises(ApiError):
+                _handle_send(service, "me@example.com", ["-e"], "sig", {})
+        printed = "\n".join(str(call.args[0]) for call in print_mock.call_args_list if call.args)
+        self.assertIn("editor_draft_recovery:", printed)
+        self.assertIn("Body", printed)
+
     def test_handle_reply_editor_mode(self) -> None:
         service = MagicMock()
         with patch(
@@ -140,6 +152,21 @@ class MainCommandTests(unittest.TestCase):
             code = _handle_reply(service, "me@example.com", ["-e", "msg1"], "sig", {})
         self.assertEqual(code, 0)
         reply_mock.assert_not_called()
+
+    def test_handle_reply_editor_mode_failure_prints_draft_and_hint(self) -> None:
+        service = MagicMock()
+        with patch(
+            "main._open_editor_template",
+            return_value=("", "", "Reply body", [], [], []),
+        ), patch("main.reply_to_message", side_effect=ApiError("not found")), patch(
+            "main.print"
+        ) as print_mock:
+            with self.assertRaises(ApiError):
+                _handle_reply(service, "me@example.com", ["-e", "thread_like_id"], "sig", {})
+        printed = "\n".join(str(call.args[0]) for call in print_mock.call_args_list if call.args)
+        self.assertIn("editor_draft_recovery:", printed)
+        self.assertIn("hint: if this id is a thread id, use: r -e -t <thread_id>", printed)
+        self.assertIn("Reply body", printed)
 
     def test_handle_send_resolves_contact_alias(self) -> None:
         service = MagicMock()

@@ -180,7 +180,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 r \"19caef2cd6494116\" \"Please review.\" -atch \"/tmp/project_dir\"",
                 "  gmail 1 r -a \"19caef2cd6494116\" \"Please review.\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
                 "  gmail 1 r -t \"19ca756c06a7ebcd\" \"Following up on this thread.\"",
-                "  gmail 1 r -ta \"19ca756c06a7ebcd\" \"Thanks everyone.\"",
+                "  gmail 1 r -t -a \"19ca756c06a7ebcd\" \"Thanks everyone.\"",
                 "",
                 "  # Spam flow",
                 "  gmail 1 si",
@@ -394,7 +394,9 @@ def _handle_send(
     signature: str,
     contacts: dict[str, str],
 ) -> int:
+    editor_mode = False
     if params == ["-e"]:
+        editor_mode = True
         to_email, subject, body, cc_emails, bcc_emails, attachment_paths = _open_editor_template(
             from_email, signature, include_to_subject=True
         )
@@ -406,16 +408,25 @@ def _handle_send(
     cc_emails = _resolve_recipient_list(cc_emails, contacts)
     bcc_emails = _resolve_recipient_list(bcc_emails, contacts)
     signed_body = _append_signature(body, signature)
-    response = send_email(
-        service,
-        from_email,
-        to_email,
-        subject,
-        signed_body,
-        cc_emails=cc_emails,
-        bcc_emails=bcc_emails,
-        attachment_paths=attachment_paths,
-    )
+    try:
+        response = send_email(
+            service,
+            from_email,
+            to_email,
+            subject,
+            signed_body,
+            cc_emails=cc_emails,
+            bcc_emails=bcc_emails,
+            attachment_paths=attachment_paths,
+        )
+    except GmailCliError:
+        if editor_mode:
+            print("editor_draft_recovery:")
+            print(f"to: {to_email}")
+            print(f"subject: {subject}")
+            print("body:")
+            print(body)
+        raise
     print(f"sent message_id={response.get('id')} thread_id={response.get('threadId')}")
     return 0
 
@@ -656,13 +667,17 @@ def _parse_reply_args(
             break
         if not token.startswith("-") or token == "-":
             break
-        for flag in token[1:]:
-            if flag not in {"a", "t", "e"}:
-                raise UsageError(
-                    f"Unknown reply option '-{flag}'. Supported: -a, -t, -e, -at, -ta, -ae, -te, -cc, -bcc, -atch"
-                )
-            flags.add(flag)
-        index += 1
+        if token in {"-a", "-t", "-e"}:
+            flags.add(token[1:])
+            index += 1
+            continue
+        if len(token) > 2 and token.startswith("-") and set(token[1:]).issubset({"a", "t", "e"}):
+            raise UsageError("Do not combine reply flags. Use separate flags, e.g. r -t -a or r -a -t.")
+        if token in _TRAILING_OPTIONS:
+            break
+        raise UsageError(
+            f"Unknown reply option '{token}'. Supported: -a, -t, -e, -cc, -bcc, -atch"
+        )
 
     remaining = params[index:]
     target_name = "thread_id" if "t" in flags else "message_id"
@@ -740,28 +755,40 @@ def _handle_reply(
     cc_emails = _resolve_recipient_list(cc_emails, contacts)
     bcc_emails = _resolve_recipient_list(bcc_emails, contacts)
     signed_body = _append_signature(body, signature)
-    if use_thread:
-        response = reply_to_thread(
-            service,
-            from_email,
-            target_id,
-            signed_body,
-            reply_all=reply_all,
-            cc_emails=cc_emails,
-            bcc_emails=bcc_emails,
-            attachment_paths=attachment_paths,
-        )
-    else:
-        response = reply_to_message(
-            service,
-            from_email,
-            target_id,
-            signed_body,
-            reply_all=reply_all,
-            cc_emails=cc_emails,
-            bcc_emails=bcc_emails,
-            attachment_paths=attachment_paths,
-        )
+    try:
+        if use_thread:
+            response = reply_to_thread(
+                service,
+                from_email,
+                target_id,
+                signed_body,
+                reply_all=reply_all,
+                cc_emails=cc_emails,
+                bcc_emails=bcc_emails,
+                attachment_paths=attachment_paths,
+            )
+        else:
+            response = reply_to_message(
+                service,
+                from_email,
+                target_id,
+                signed_body,
+                reply_all=reply_all,
+                cc_emails=cc_emails,
+                bcc_emails=bcc_emails,
+                attachment_paths=attachment_paths,
+            )
+    except GmailCliError:
+        if use_editor:
+            print("editor_draft_recovery:")
+            if use_thread:
+                print(f"thread_id: {target_id}")
+            else:
+                print(f"message_id: {target_id}")
+                print("hint: if this id is a thread id, use: r -e -t <thread_id>")
+            print("body:")
+            print(body)
+        raise
     print(f"replied message_id={response.get('id')} thread_id={response.get('threadId')}")
     return 0
 

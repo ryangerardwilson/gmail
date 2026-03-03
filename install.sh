@@ -163,9 +163,17 @@ else
     exit 1
   fi
 
+  payload_dir="$(dirname "$extracted_binary")"
   rm -rf "$APP_DIR"
   mkdir -p "$APP_DIR/${APP}"
-  cp "$extracted_binary" "$APP_DIR/${APP}/${APP}"
+  if [[ "$payload_dir" == "$tmp_dir" ]]; then
+    cp "$extracted_binary" "$APP_DIR/${APP}/${APP}"
+    if [[ -d "$tmp_dir/_internal" ]]; then
+      cp -a "$tmp_dir/_internal" "$APP_DIR/${APP}/_internal"
+    fi
+  else
+    cp -a "$payload_dir/." "$APP_DIR/${APP}/"
+  fi
   chmod 755 "$APP_DIR/${APP}/${APP}"
   rm -rf "$tmp_dir"
 

@@ -16,8 +16,8 @@ from gmail_cli.formatters import summarize_message
 from gmail_cli.gmail_api import (
     delete_message,
     get_thread_messages,
-    list_all_messages,
     list_messages,
+    list_messages_page,
     mark_message_read,
     reply_to_message,
     reply_to_thread,
@@ -250,60 +250,120 @@ def _handle_list(
     if params[0] == "-ura":
         if config_path is None or account is None:
             raise UsageError("Internal error: ls -ura requires account context")
-        if len(params) == 1:
-            messages = list_all_messages(service, "is:unread")
-        else:
-            max_results = _parse_optional_limit("ls -ura", params, default_limit)
-            messages = list_messages(service, "is:unread", max_results)
-        if not messages:
-            print("No unread messages found.")
-            return 0
-
         spam_senders = list(account.spam_senders)
         spam_set = set(spam_senders)
         trashed = 0
         audited = 0
+        stopped = False
 
         print(
             "Unread audit mode: enter 's' for spam (add sender to spam_senders + trash message), "
             "'t' for trash only, 'n' for not spam (leave unread), 'q' to stop."
         )
-        for index, message in enumerate(messages, start=1):
-            audited += 1
-            row = summarize_message(message)
-            sender = parseaddr(row.get("from", ""))[1].strip().lower() or row.get("from_email", "").strip().lower()
-            message_id = str(message.get("id", ""))
-            print(f"\n[{index}/{len(messages)}] message_id={message_id}")
-            print(f"from    : {row.get('from', '')}")
-            print(f"subject : {row.get('subject', '')}")
-            print(f"date    : {row.get('date', '')}")
-            print(f"snippet : {str(message.get('snippet', ''))}")
-
+        if len(params) == 1:
+            page_token: str | None = None
+            batch_index = 0
             while True:
-                choice = input("action [s=spam, t=trash only, n=not spam, q=quit]: ").strip().lower()
-                if choice not in {"s", "t", "n", "q"}:
-                    print("Invalid input. Use s, t, n, or q.")
+                messages, next_page = list_messages_page(
+                    service, "is:unread", max_results=10, page_token=page_token
+                )
+                if not messages:
+                    if audited == 0:
+                        print("No unread messages found.")
+                    break
+
+                batch_index += 1
+                print(f"\nProcessing unread batch {batch_index} ({len(messages)} messages)")
+                for index, message in enumerate(messages, start=1):
+                    audited += 1
+                    row = summarize_message(message)
+                    sender = parseaddr(row.get("from", ""))[1].strip().lower() or row.get("from_email", "").strip().lower()
+                    message_id = str(message.get("id", ""))
+                    print(f"\n[{index}/{len(messages)}] message_id={message_id}")
+                    print(f"from    : {row.get('from', '')}")
+                    print(f"subject : {row.get('subject', '')}")
+                    print(f"date    : {row.get('date', '')}")
+                    body_preview = row.get("body", "").strip() or str(message.get("snippet", ""))
+                    print("body:")
+                    print(body_preview)
+
+                    while True:
+                        choice = input("action [s=spam, t=trash only, n=not spam, q=quit]: ").strip().lower()
+                        if choice not in {"s", "t", "n", "q"}:
+                            print("Invalid input. Use s, t, n, or q.")
+                            continue
+                        break
+
+                    if choice == "q":
+                        audited -= 1
+                        stopped = True
+                        break
+                    if choice == "n":
+                        continue
+                    delete_message(service, message_id)
+                    trashed += 1
+                    if choice == "t":
+                        print(f"trashed message_id={message_id}")
+                        continue
+
+                    if not sender:
+                        print("trashed message, but could not parse sender email for spam_senders update")
+                        continue
+                    if sender not in spam_set:
+                        spam_set.add(sender)
+                        spam_senders.append(sender)
+                    print(f"trashed message_id={message_id} and added sender to spam_senders: {sender}")
+
+                if stopped:
+                    break
+                if not next_page:
+                    break
+                page_token = next_page
+        else:
+            max_results = _parse_optional_limit("ls -ura", params, default_limit)
+            messages = list_messages(service, "is:unread", max_results)
+            if not messages:
+                print("No unread messages found.")
+                return 0
+
+            for index, message in enumerate(messages, start=1):
+                audited += 1
+                row = summarize_message(message)
+                sender = parseaddr(row.get("from", ""))[1].strip().lower() or row.get("from_email", "").strip().lower()
+                message_id = str(message.get("id", ""))
+                print(f"\n[{index}/{len(messages)}] message_id={message_id}")
+                print(f"from    : {row.get('from', '')}")
+                print(f"subject : {row.get('subject', '')}")
+                print(f"date    : {row.get('date', '')}")
+                body_preview = row.get("body", "").strip() or str(message.get("snippet", ""))
+                print("body:")
+                print(body_preview)
+
+                while True:
+                    choice = input("action [s=spam, t=trash only, n=not spam, q=quit]: ").strip().lower()
+                    if choice not in {"s", "t", "n", "q"}:
+                        print("Invalid input. Use s, t, n, or q.")
+                        continue
+                    break
+
+                if choice == "q":
+                    audited -= 1
+                    break
+                if choice == "n":
                     continue
-                break
+                delete_message(service, message_id)
+                trashed += 1
+                if choice == "t":
+                    print(f"trashed message_id={message_id}")
+                    continue
 
-            if choice == "q":
-                audited -= 1
-                break
-            if choice == "n":
-                continue
-            delete_message(service, message_id)
-            trashed += 1
-            if choice == "t":
-                print(f"trashed message_id={message_id}")
-                continue
-
-            if not sender:
-                print("trashed message, but could not parse sender email for spam_senders update")
-                continue
-            if sender not in spam_set:
-                spam_set.add(sender)
-                spam_senders.append(sender)
-            print(f"trashed message_id={message_id} and added sender to spam_senders: {sender}")
+                if not sender:
+                    print("trashed message, but could not parse sender email for spam_senders update")
+                    continue
+                if sender not in spam_set:
+                    spam_set.add(sender)
+                    spam_senders.append(sender)
+                print(f"trashed message_id={message_id} and added sender to spam_senders: {sender}")
 
         update_account_sender_lists(
             config_path,

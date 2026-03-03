@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 from gmail_cli.errors import UsageError
 from main import _handle_delete, _handle_list, _handle_mark_read, main
@@ -94,7 +95,7 @@ class MainCommandTests(unittest.TestCase):
         update_payload = update_mock.call_args.args[1]
         self.assertIn("spam@x.com", update_payload["1"]["spam_senders"])
 
-    def test_handle_list_unread_audit_no_limit_fetches_all(self) -> None:
+    def test_handle_list_unread_audit_no_limit_uses_batches(self) -> None:
         service = MagicMock()
         account = AccountConfig(
             preset="1",
@@ -104,17 +105,19 @@ class MainCommandTests(unittest.TestCase):
             spam_senders=[],
             not_spam_senders=[],
         )
-        with patch("main.list_all_messages", return_value=[] ) as list_all_mock:
+        with patch("main.list_messages_page", return_value=([], None) ) as list_page_mock, patch(
+            "main.update_account_sender_lists"
+        ):
             code = _handle_list(
                 service,
                 ["-ura"],
                 default_limit=10,
                 my_email="me@example.com",
-                config_path="/tmp/config.json",
+                config_path=Path("/tmp/config.json"),
                 account=account,
             )
         self.assertEqual(code, 0)
-        list_all_mock.assert_called_once_with(service, "is:unread")
+        list_page_mock.assert_called_once_with(service, "is:unread", max_results=10, page_token=None)
 
     def test_handle_list_unread_audit_trash_only(self) -> None:
         service = MagicMock()

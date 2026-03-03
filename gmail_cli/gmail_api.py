@@ -294,6 +294,46 @@ def list_all_messages(service, gmail_query: str) -> list[dict[str, Any]]:
     return results
 
 
+def list_messages_page(
+    service,
+    gmail_query: str,
+    max_results: int,
+    page_token: str | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    try:
+        response = (
+            service.users()
+            .messages()
+            .list(userId="me", q=gmail_query, maxResults=max_results, pageToken=page_token)
+            .execute()
+        )
+    except Exception as exc:  # pragma: no cover
+        raise ApiError(f"Gmail search failed: {exc}") from exc
+
+    ids = response.get("messages", [])
+    results: list[dict[str, Any]] = []
+    for item in ids:
+        message_id = item.get("id")
+        if not isinstance(message_id, str):
+            continue
+        try:
+            details = (
+                service.users()
+                .messages()
+                .get(
+                    userId="me",
+                    id=message_id,
+                    format="full",
+                )
+                .execute()
+            )
+        except Exception as exc:  # pragma: no cover
+            raise ApiError(f"Failed to fetch message details for {message_id}: {exc}") from exc
+        results.append(details)
+
+    return results, response.get("nextPageToken")
+
+
 def get_thread_messages(service, thread_id: str) -> list[dict[str, Any]]:
     try:
         response = (

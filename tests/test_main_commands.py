@@ -238,6 +238,23 @@ class MainCommandTests(unittest.TestCase):
         with self.assertRaises(UsageError):
             _handle_list(service, ["-ur", "0"], default_limit=10, my_email="me@example.com")
 
+    def test_handle_list_read_default_limit(self) -> None:
+        service = MagicMock()
+        with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            code = _handle_list(service, ["-r"], default_limit=10, my_email="me@example.com")
+        self.assertEqual(code, 0)
+        list_messages_mock.assert_called_once_with(service, "is:read", 10)
+
+    def test_handle_list_read_custom_limit(self) -> None:
+        service = MagicMock()
+        with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            _handle_list(service, ["-r", "1"], default_limit=10, my_email="me@example.com")
+        list_messages_mock.assert_called_once_with(service, "is:read", 1)
+
     def test_handle_mark_read(self) -> None:
         service = MagicMock()
         with patch("main.mark_message_read", return_value={"id": "m1", "threadId": "t1"}) as mark_mock:

@@ -90,6 +90,7 @@ gmail <preset> s -e
 gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 gmail <preset> ls <query>
 gmail <preset> ls -ur [limit]
+gmail <preset> ls -r [limit]
 gmail <preset> ls -ura [limit]
 gmail <preset> ls -ra [limit]
 gmail <preset> ls -t <thread_id>
@@ -109,8 +110,11 @@ gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp
 
 # List and audit messages
 gmail 1 ls "from maanas limit 1"
+gmail 1 ls "from xyz limit 5"
 gmail 1 ls -ur
 gmail 1 ls -ur 1
+gmail 1 ls -r
+gmail 1 ls -r 1
 # Audit unread emails
 gmail 1 ls -ura 10
 # Audit read emails
@@ -178,6 +182,7 @@ Message utilities:
 - `mr <message_id>`: mark a single message as read.
 - `d <message_id>`: delete a single message.
 - `ls -ur [limit]`: list unread messages only; if `limit` is omitted, uses config default list limit.
+- `ls -r [limit]`: list read messages only; if `limit` is omitted, uses config default list limit.
 - `ls -ura [limit]`: interactive unread audit. Without `limit`, audits all unread messages continuously in batches of 10. For each unread message: `s` marks spam (adds sender to `spam_senders` and trashes message), `t` trashes message without spam-list update, `n` leaves message unread, `q` stops audit.
 - `ls -ra [limit]`: interactive read-mail audit with the same actions as `-ura`; without `limit`, processes read messages continuously in batches of 10.
 - Safety rule: both `-ura` and `-ra` never trash emails from `@gmail.com` senders.

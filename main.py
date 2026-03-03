@@ -63,6 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "gmail <preset> ls <query>\n"
             "gmail <preset> ls -ur [limit]\n"
+            "gmail <preset> ls -r [limit]\n"
             "gmail <preset> ls -ura [limit]\n"
             "gmail <preset> ls -ra [limit]\n"
             "gmail <preset> ls -t <thread_id>\n"
@@ -112,6 +113,7 @@ def _print_usage_guide() -> None:
                 "  gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "  gmail <preset> ls <query>",
                 "  gmail <preset> ls -ur [limit]",
+                "  gmail <preset> ls -r [limit]",
                 "  gmail <preset> ls -ura [limit]",
                 "  gmail <preset> ls -ra [limit]",
                 "  gmail <preset> ls -t <thread_id>",
@@ -128,8 +130,11 @@ def _print_usage_guide() -> None:
                 "",
                 "  # List and audit messages",
                 "  gmail 1 ls \"contains jake limit 1\"",
+                "  gmail 1 ls \"from xyz limit 5\"",
                 "  gmail 1 ls -ur",
                 "  gmail 1 ls -ur 1",
+                "  gmail 1 ls -r",
+                "  gmail 1 ls -r 1",
                 "  # Audit unread emails",
                 "  gmail 1 ls -ura 10",
                 "  # Audit read emails",
@@ -478,6 +483,12 @@ def _handle_list(
     if params[0] == "-ur":
         max_results = _parse_optional_limit("ls -ur", params, default_limit)
         messages = list_messages(service, "is:unread", max_results)
+        print(render_messages_table(messages, my_email))
+        return 0
+
+    if params[0] == "-r":
+        max_results = _parse_optional_limit("ls -r", params, default_limit)
+        messages = list_messages(service, "is:read", max_results)
         print(render_messages_table(messages, my_email))
         return 0
 

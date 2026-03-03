@@ -252,7 +252,6 @@ for alias, email in sorted(contacts.items()):
     if not a or not e:
         continue
     print(a)
-    print(e)
 PY
 }
 

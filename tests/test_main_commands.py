@@ -69,7 +69,7 @@ class MainCommandTests(unittest.TestCase):
                 [Path("/tmp/a")],
             ),
         ) as editor_mock, patch("main.send_email", return_value={"id": "m1", "threadId": "t1"}) as send_mock:
-            code = _handle_send(service, "me@example.com", ["-e"], "sig")
+            code = _handle_send(service, "me@example.com", ["-e"], "sig", {})
 
         self.assertEqual(code, 0)
         editor_mock.assert_called_once_with("me@example.com", "sig", include_to_subject=True)
@@ -86,7 +86,7 @@ class MainCommandTests(unittest.TestCase):
             "main._open_editor_template",
             return_value=("", "Subject", "Body", [], [], []),
         ), patch("main.send_email") as send_mock:
-            code = _handle_send(service, "me@example.com", ["-e"], "sig")
+            code = _handle_send(service, "me@example.com", ["-e"], "sig", {})
         self.assertEqual(code, 0)
         send_mock.assert_not_called()
 
@@ -114,6 +114,7 @@ class MainCommandTests(unittest.TestCase):
                 "me@example.com",
                 ["-e", "msg1", "-cc", "cc-cli@example.com", "-atch", "/tmp/attach-cli"],
                 "sig",
+                {},
             )
         self.assertEqual(code, 0)
         editor_mock.assert_called_once_with("me@example.com", "sig", include_to_subject=False)
@@ -133,9 +134,87 @@ class MainCommandTests(unittest.TestCase):
             "main._open_editor_template",
             return_value=("", "", "", [], [], []),
         ), patch("main.reply_to_message") as reply_mock:
-            code = _handle_reply(service, "me@example.com", ["-e", "msg1"], "sig")
+            code = _handle_reply(service, "me@example.com", ["-e", "msg1"], "sig", {})
         self.assertEqual(code, 0)
         reply_mock.assert_not_called()
+
+    def test_handle_send_resolves_contact_alias(self) -> None:
+        service = MagicMock()
+        with patch("main.send_email", return_value={"id": "m1", "threadId": "t1"}) as send_mock:
+            code = _handle_send(
+                service,
+                "me@example.com",
+                ["silvia", "Subject", "Body", "-cc", "team,person@example.com"],
+                "sig",
+                {"silvia": "xyz@hbc.com", "team": "team@example.com"},
+            )
+        self.assertEqual(code, 0)
+        args, kwargs = send_mock.call_args
+        self.assertEqual(args[2], "xyz@hbc.com")
+        self.assertEqual(kwargs["cc_emails"], ["team@example.com", "person@example.com"])
+
+    def test_cn_add_contact(self) -> None:
+        with patch("main.load_config") as load_config_mock, patch(
+            "main.get_account"
+        ) as get_account_mock, patch("main.build_gmail_service"), patch(
+            "main._read_signature", return_value="sig"
+        ), patch("main.update_account_contacts") as update_mock:
+            config = MagicMock()
+            config.path = Path("/tmp/config.json")
+            load_config_mock.return_value = config
+            get_account_mock.return_value = AccountConfig(
+                preset="1",
+                email="me@example.com",
+                client_secret_file=MagicMock(),
+                signature_file=MagicMock(),
+                contacts={"old": "old@example.com"},
+            )
+            code = main(["1", "cn", "-a", "silvia", "xyz@hbc.com"])
+        self.assertEqual(code, 0)
+        update_mock.assert_called_once_with(
+            Path("/tmp/config.json"),
+            "1",
+            {"old": "old@example.com", "silvia": "xyz@hbc.com"},
+        )
+
+    def test_cn_delete_contact(self) -> None:
+        with patch("main.load_config") as load_config_mock, patch(
+            "main.get_account"
+        ) as get_account_mock, patch("main.build_gmail_service"), patch(
+            "main._read_signature", return_value="sig"
+        ), patch("main.update_account_contacts") as update_mock:
+            config = MagicMock()
+            config.path = Path("/tmp/config.json")
+            load_config_mock.return_value = config
+            get_account_mock.return_value = AccountConfig(
+                preset="1",
+                email="me@example.com",
+                client_secret_file=MagicMock(),
+                signature_file=MagicMock(),
+                contacts={"silvia": "xyz@hbc.com"},
+            )
+            code = main(["1", "cn", "-d", "silvia"])
+        self.assertEqual(code, 0)
+        update_mock.assert_called_once_with(Path("/tmp/config.json"), "1", {})
+
+    def test_cn_list_no_contacts(self) -> None:
+        with patch("main.load_config") as load_config_mock, patch(
+            "main.get_account"
+        ) as get_account_mock, patch("main.build_gmail_service"), patch(
+            "main._read_signature", return_value="sig"
+        ):
+            config = MagicMock()
+            config.path = Path("/tmp/config.json")
+            load_config_mock.return_value = config
+            get_account_mock.return_value = AccountConfig(
+                preset="1",
+                email="me@example.com",
+                client_secret_file=MagicMock(),
+                signature_file=MagicMock(),
+                contacts={},
+            )
+            code = main(["1", "cn"])
+        self.assertEqual(code, 0)
 
     def test_handle_list_unread_default_limit(self) -> None:
         service = MagicMock()

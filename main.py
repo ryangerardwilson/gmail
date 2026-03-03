@@ -15,6 +15,7 @@ from gmail_cli.config import (
     get_account,
     load_config,
     normalize_spam_sender_list,
+    update_account_contacts,
     update_account_sender_lists,
 )
 from gmail_cli.errors import ConfigError, GmailCliError, UsageError
@@ -52,6 +53,10 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> sc\n"
             "gmail <preset> sa <spam_email1,spam_email2,...>\n"
             "gmail <preset> sa -ur\n"
+            "gmail <preset> cn\n"
+            "gmail <preset> cn -a <alias> <email>\n"
+            "gmail <preset> cn -d <alias>\n"
+            "gmail <preset> cn -e\n"
             "gmail <preset> mr <message_id>\n"
             "gmail <preset> d <message_id>\n"
             "gmail <preset> s -e\n"
@@ -80,7 +85,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "preset", nargs="?", help="Account preset key from config.json, e.g. 1"
     )
-    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | mr | d | si | sc | sa")
+    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | mr | d | si | sc | sa | cn")
     parser.add_argument("params", nargs=argparse.REMAINDER, help="Command parameters")
     return parser
 
@@ -97,6 +102,10 @@ def _print_usage_guide() -> None:
                 "  gmail <preset> sc",
                 "  gmail <preset> sa <spam_email1,spam_email2,...>",
                 "  gmail <preset> sa -ur",
+                "  gmail <preset> cn",
+                "  gmail <preset> cn -a <alias> <email>",
+                "  gmail <preset> cn -d <alias>",
+                "  gmail <preset> cn -e",
                 "  gmail <preset> mr <message_id>",
                 "  gmail <preset> d <message_id>",
                 "  gmail <preset> s -e",
@@ -147,6 +156,12 @@ def _print_usage_guide() -> None:
                 "  gmail 1 sc",
                 "  gmail 1 sa \"spam1@example.com,spam2@example.com\"",
                 "  gmail 1 sa -ur",
+                "",
+                "  # Contacts",
+                "  gmail 1 cn",
+                "  gmail 1 cn -a \"silvia\" \"xyz@hbc.com\"",
+                "  gmail 1 cn -d \"silvia\"",
+                "  gmail 1 cn -e",
             ]
         )
     )
@@ -275,6 +290,19 @@ def _parse_attachment_path(value: str) -> Path:
     return path
 
 
+def _resolve_contact(value: str, contacts: dict[str, str]) -> str:
+    candidate = value.strip()
+    if not candidate:
+        return candidate
+    if "@" in candidate:
+        return candidate
+    return contacts.get(candidate.lower(), candidate)
+
+
+def _resolve_recipient_list(values: list[str], contacts: dict[str, str]) -> list[str]:
+    return [_resolve_contact(value, contacts) for value in values]
+
+
 def _consume_attachment_paths(tokens: list[str], start_index: int) -> tuple[list[Path], int]:
     if start_index >= len(tokens) or tokens[start_index] in _TRAILING_OPTIONS:
         raise UsageError("-atch requires at least one path to a file or directory")
@@ -327,7 +355,13 @@ def _parse_send_args(
     return to_email, subject, body, cc_emails, bcc_emails, attachment_paths
 
 
-def _handle_send(service, from_email: str, params: list[str], signature: str) -> int:
+def _handle_send(
+    service,
+    from_email: str,
+    params: list[str],
+    signature: str,
+    contacts: dict[str, str],
+) -> int:
     if params == ["-e"]:
         to_email, subject, body, cc_emails, bcc_emails, attachment_paths = _open_editor_template(
             from_email, signature, include_to_subject=True
@@ -336,6 +370,9 @@ def _handle_send(service, from_email: str, params: list[str], signature: str) ->
             return 0
     else:
         to_email, subject, body, cc_emails, bcc_emails, attachment_paths = _parse_send_args(params)
+    to_email = _resolve_contact(to_email, contacts)
+    cc_emails = _resolve_recipient_list(cc_emails, contacts)
+    bcc_emails = _resolve_recipient_list(bcc_emails, contacts)
     signed_body = _append_signature(body, signature)
     response = send_email(
         service,
@@ -612,7 +649,13 @@ def _parse_reply_args(
     return "t" in flags, "a" in flags, use_editor, target_id, body, cc_emails, bcc_emails, attachment_paths
 
 
-def _handle_reply(service, from_email: str, params: list[str], signature: str) -> int:
+def _handle_reply(
+    service,
+    from_email: str,
+    params: list[str],
+    signature: str,
+    contacts: dict[str, str],
+) -> int:
     (
         use_thread,
         reply_all,
@@ -633,6 +676,8 @@ def _handle_reply(service, from_email: str, params: list[str], signature: str) -
         cc_emails = cc_from_editor + cc_emails
         bcc_emails = bcc_from_editor + bcc_emails
         attachment_paths = attachment_from_editor + attachment_paths
+    cc_emails = _resolve_recipient_list(cc_emails, contacts)
+    bcc_emails = _resolve_recipient_list(bcc_emails, contacts)
     signed_body = _append_signature(body, signature)
     if use_thread:
         response = reply_to_thread(
@@ -697,7 +742,7 @@ def _handle_spam_identify(config, account, service) -> int:
         return 0
 
     merged_spam = _merge_unique(account.spam_senders, decision.add_to_spam)
-    update_account_sender_lists(config.path, {preset: merged_spam})
+    update_account_sender_lists(config.path, {account.preset: merged_spam})
     print(f"updated: +{len(decision.add_to_spam)} spam")
     print(f"si complete: spam_added={len(decision.add_to_spam)}")
     return 0
@@ -799,6 +844,68 @@ def _handle_delete(service, params: list[str]) -> int:
     return 0
 
 
+def _handle_contacts(config, account, params: list[str]) -> int:
+    contacts = dict(account.contacts)
+    if not params:
+        if not contacts:
+            print("no contacts configured")
+            return 0
+        print("contacts:")
+        for index, alias in enumerate(sorted(contacts.keys()), start=1):
+            print(f"  {index}. {alias} -> {contacts[alias]}")
+        return 0
+
+    action = params[0]
+    if action == "-e":
+        if len(params) != 1:
+            raise UsageError("cn -e does not accept extra args")
+        editor_cmd = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vim"
+        editor_parts = shlex.split(editor_cmd)
+        if not editor_parts:
+            raise UsageError("Editor command is empty. Set VISUAL or EDITOR.")
+        try:
+            proc = subprocess.run([*editor_parts, str(config.path)], check=False)
+        except FileNotFoundError as exc:
+            raise UsageError(
+                f"Editor not found: {editor_cmd}. Set VISUAL or EDITOR to a valid editor."
+            ) from exc
+        if proc.returncode != 0:
+            raise UsageError(f"Editor exited with code {proc.returncode}")
+        return 0
+
+    if action == "-a":
+        if len(params) != 3:
+            raise UsageError("cn -a requires: <alias> <email>")
+        alias = params[1].strip().lower()
+        email = params[2].strip()
+        if not alias:
+            raise UsageError("cn -a requires non-empty alias")
+        if "@" not in email:
+            email = _resolve_contact(email, contacts)
+        if "@" not in email:
+            raise UsageError("cn -a requires an email address")
+        contacts[alias] = email
+        update_account_contacts(config.path, account.preset, contacts)
+        print(f"contact added: {alias} -> {email}")
+        return 0
+
+    if action == "-d":
+        if len(params) != 2:
+            raise UsageError("cn -d requires: <alias>")
+        alias = params[1].strip().lower()
+        if not alias:
+            raise UsageError("cn -d requires non-empty alias")
+        if alias not in contacts:
+            print(f"contact not found: {alias}")
+            return 0
+        del contacts[alias]
+        update_account_contacts(config.path, account.preset, contacts)
+        print(f"contact deleted: {alias}")
+        return 0
+
+    raise UsageError("cn supports: (no args), -a <alias> <email>, -d <alias>, -e")
+
+
 def _read_signature(signature_file) -> str:
     signature = signature_file.read_text(encoding="utf-8").strip()
     if not signature:
@@ -848,7 +955,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_usage_guide()
         return 0
     first = argv[0].lower()
-    preset_required_commands = {"s", "-s", "ls", "r", "si", "sc", "sa", "mr", "d"}
+    preset_required_commands = {"s", "-s", "ls", "r", "si", "sc", "sa", "mr", "d", "cn"}
     if first in preset_required_commands:
         hint = " ".join(argv)
         raise UsageError(
@@ -867,12 +974,15 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_config()
     account = get_account(config, args.preset)
-    service = build_gmail_service(account)
-    signature = _read_signature(account.signature_file)
 
     command = args.command.lower()
+    if command == "cn":
+        return _handle_contacts(config, account, args.params)
+
+    service = build_gmail_service(account)
     if command in {"s", "-s"}:
-        return _handle_send(service, account.email, args.params, signature)
+        signature = _read_signature(account.signature_file)
+        return _handle_send(service, account.email, args.params, signature, account.contacts)
 
     if command == "ls":
         return _handle_list(
@@ -885,7 +995,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if command == "r":
-        return _handle_reply(service, account.email, args.params, signature)
+        signature = _read_signature(account.signature_file)
+        return _handle_reply(service, account.email, args.params, signature, account.contacts)
 
     if command == "mr":
         return _handle_mark_read(service, args.params)
@@ -906,7 +1017,9 @@ def main(argv: list[str] | None = None) -> int:
     if command == "sa":
         return _handle_spam_add(config, account, service, args.params)
 
-    raise UsageError(f"Unknown command '{args.command}'. Use s, ls, r, mr, d, si, sc, or sa.")
+    raise UsageError(
+        f"Unknown command '{args.command}'. Use s, ls, r, mr, d, si, sc, sa, or cn."
+    )
 
 
 if __name__ == "__main__":

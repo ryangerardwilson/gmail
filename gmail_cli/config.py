@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +15,8 @@ class AccountConfig:
     email: str
     client_secret_file: Path
     signature_file: Path
-    spam_senders: list[str]
+    spam_senders: list[str] = field(default_factory=list)
+    contacts: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,23 @@ def normalize_sender_list(values: Any) -> list[str]:
 def normalize_spam_sender_list(values: Any) -> list[str]:
     out = normalize_sender_list(values)
     return [item for item in out if not item.endswith("@gmail.com")]
+
+
+def normalize_contacts(values: Any) -> dict[str, str]:
+    if values is None:
+        return {}
+    if not isinstance(values, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, value in values.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        alias = key.strip().lower()
+        email = value.strip()
+        if not alias or not email:
+            continue
+        out[alias] = email
+    return out
 
 
 def resolve_config_path() -> Path:
@@ -86,6 +104,7 @@ def _validate_account(preset: str, raw: Any, config_path: Path) -> AccountConfig
     client_secret = raw.get("client_secret_file")
     signature_file = raw.get("signature_file")
     spam_senders = normalize_spam_sender_list(raw.get("spam_senders"))
+    contacts = normalize_contacts(raw.get("contacts"))
 
     if not isinstance(email, str) or not email.strip():
         raise ConfigError(
@@ -123,6 +142,7 @@ def _validate_account(preset: str, raw: Any, config_path: Path) -> AccountConfig
         client_secret_file=client_secret_path,
         signature_file=signature_path,
         spam_senders=spam_senders,
+        contacts=contacts,
     )
 
 
@@ -199,4 +219,31 @@ def update_account_sender_lists(
         spam_values = normalize_spam_sender_list(spam_list)
         account["spam_senders"] = spam_values
 
+    config_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+
+
+def update_account_contacts(
+    config_path: Path,
+    preset: str,
+    contacts: dict[str, str],
+) -> None:
+    config_path = config_path.expanduser()
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"Invalid JSON in config {config_path}: {exc}") from exc
+
+    if not isinstance(raw, dict):
+        raise ConfigError(f"Invalid config at {config_path}: root must be an object")
+    accounts = raw.get("accounts")
+    if not isinstance(accounts, dict):
+        raise ConfigError(f"Invalid config at {config_path}: 'accounts' must be an object")
+
+    account = accounts.get(preset)
+    if not isinstance(account, dict):
+        raise ConfigError(
+            f"Invalid config at {config_path}: preset '{preset}' not found in accounts"
+        )
+
+    account["contacts"] = normalize_contacts(contacts)
     config_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")

@@ -6,6 +6,8 @@ REPO="ryangerardwilson/gmail"
 APP_HOME="$HOME/.${APP}"
 INSTALL_DIR="$APP_HOME/bin"
 APP_DIR="$APP_HOME/app"
+COMPLETION_DIR="$APP_HOME/completions"
+COMPLETION_FILE="$COMPLETION_DIR/${APP}.bash"
 
 MUTED='\033[0;2m'
 RED='\033[0;31m'
@@ -68,6 +70,7 @@ print_message() {
 }
 
 mkdir -p "$INSTALL_DIR"
+mkdir -p "$COMPLETION_DIR"
 
 if [[ -n "$binary_path" ]]; then
   [[ -f "$binary_path" ]] || { print_message error "Binary not found: $binary_path"; exit 1; }
@@ -167,6 +170,129 @@ add_to_path() {
   fi
 }
 
+add_shell_line() {
+  local config_file=$1
+  local line=$2
+  local label=$3
+
+  if grep -Fxq "$line" "$config_file" 2>/dev/null; then
+    print_message info "${MUTED}${label} already present in ${NC}$config_file"
+  elif [[ -w "$config_file" ]]; then
+    {
+      echo ""
+      echo "# ${APP}"
+      echo "$line"
+    } >> "$config_file"
+    print_message info "${MUTED}Added ${label} to ${NC}$config_file"
+  else
+    print_message info "Add this to your shell config:"
+    print_message info "  $line"
+  fi
+}
+
+write_bash_completion() {
+  cat > "$COMPLETION_FILE" <<'BASHCOMP'
+#!/usr/bin/env bash
+
+_gmail_complete_values() {
+  local mode="$1"
+  local preset="$2"
+  MODE="$mode" PRESET="$preset" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+mode = os.environ.get("MODE", "")
+preset = os.environ.get("PRESET", "")
+
+cfg = os.environ.get("GMAIL_CLI_CONFIG")
+if cfg:
+    path = Path(cfg).expanduser()
+else:
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        path = Path(xdg).expanduser() / "gmail" / "config.json"
+    else:
+        path = Path("~/.config/gmail/config.json").expanduser()
+
+if not path.exists():
+    raise SystemExit(0)
+
+try:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+
+accounts = raw.get("accounts", {})
+if not isinstance(accounts, dict):
+    raise SystemExit(0)
+
+if mode == "presets":
+    for key in sorted(accounts.keys()):
+        if isinstance(key, str):
+            print(key)
+    raise SystemExit(0)
+
+if not preset:
+    raise SystemExit(0)
+
+account = accounts.get(preset)
+if not isinstance(account, dict):
+    raise SystemExit(0)
+
+contacts = account.get("contacts", {})
+if not isinstance(contacts, dict):
+    raise SystemExit(0)
+
+for alias, email in sorted(contacts.items()):
+    if not isinstance(alias, str) or not isinstance(email, str):
+        continue
+    a = alias.strip()
+    e = email.strip()
+    if not a or not e:
+        continue
+    print(a)
+    print(e)
+PY
+}
+
+_gmail_completion() {
+  local cur prev cword
+  cur="${COMP_WORDS[COMP_CWORD]}"
+  prev="${COMP_WORDS[COMP_CWORD-1]}"
+  cword="$COMP_CWORD"
+
+  if [[ $cword -eq 1 ]]; then
+    COMPREPLY=( $(compgen -W "-v -u $(_gmail_complete_values presets '')" -- "$cur") )
+    return 0
+  fi
+
+  local preset="${COMP_WORDS[1]}"
+  local cmd="${COMP_WORDS[2]}"
+
+  if [[ $cword -eq 2 ]]; then
+    COMPREPLY=( $(compgen -W "s ls r mr d si sc sa cn" -- "$cur") )
+    return 0
+  fi
+
+  if [[ "$cmd" == "s" && $cword -eq 3 ]]; then
+    COMPREPLY=( $(compgen -W "$(_gmail_complete_values contacts "$preset")" -- "$cur") )
+    return 0
+  fi
+
+  if [[ "$prev" == "-cc" || "$prev" == "-bcc" ]]; then
+    COMPREPLY=( $(compgen -W "$(_gmail_complete_values contacts "$preset")" -- "$cur") )
+    return 0
+  fi
+}
+
+complete -F _gmail_completion gmail
+BASHCOMP
+  chmod 644 "$COMPLETION_FILE"
+}
+
+write_bash_completion
+
 if [[ "$no_modify_path" != "true" ]]; then
   if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
@@ -195,6 +321,29 @@ if [[ "$no_modify_path" != "true" ]]; then
       fi
     fi
   fi
+fi
+
+XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
+bash_completion_candidates=(
+  "$HOME/.bashrc"
+  "$HOME/.bash_profile"
+  "$HOME/.profile"
+  "$XDG_CONFIG_HOME/bash/.bashrc"
+  "$XDG_CONFIG_HOME/bash/.bash_profile"
+)
+bash_completion_file=""
+for f in "${bash_completion_candidates[@]}"; do
+  if [[ -f "$f" ]]; then
+    bash_completion_file="$f"
+    break
+  fi
+done
+
+if [[ -n "$bash_completion_file" ]]; then
+  add_shell_line "$bash_completion_file" "source \"$COMPLETION_FILE\"" "bash completion"
+else
+  print_message info "${MUTED}Bash completion installed at ${NC}$COMPLETION_FILE"
+  print_message info "${MUTED}Add to your shell config:${NC} source \"$COMPLETION_FILE\""
 fi
 
 echo ""

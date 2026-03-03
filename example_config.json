@@ -3,7 +3,10 @@
     "1": {
       "email": "first@yourdomain.com",
       "client_secret_file": "/absolute/path/to/oauth-client.json",
-      "signature_file": "/home/you/.config/gmail/signatures/account1.txt"
+      "signature_file": "/home/you/.config/gmail/signatures/account1.txt",
+      "contacts": {
+        "silvia": "xyz@hbc.com"
+      }
     },
     "2": {
       "email": "second@yourdomain.com",

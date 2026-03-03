@@ -49,7 +49,10 @@ Example:
       "email": "first@yourdomain.com",
       "client_secret_file": "/home/you/.config/gmail/client_secret.json",
       "signature_file": "/home/you/.config/gmail/signatures/account1.txt",
-      "spam_senders": ["annoying@promo.biz"]
+      "spam_senders": ["annoying@promo.biz"],
+      "contacts": {
+        "silvia": "xyz@hbc.com"
+      }
     },
     "2": {
       "email": "second@yourdomain.com",
@@ -77,6 +80,10 @@ gmail <preset> si
 gmail <preset> sc
 gmail <preset> sa <spam_email1,spam_email2,...>
 gmail <preset> sa -ur
+gmail <preset> cn
+gmail <preset> cn -a <alias> <email>
+gmail <preset> cn -d <alias>
+gmail <preset> cn -e
 gmail <preset> mr <message_id>
 gmail <preset> d <message_id>
 gmail <preset> s -e
@@ -130,6 +137,12 @@ gmail 1 si
 gmail 1 sc
 gmail 1 sa "spam1@example.com,spam2@example.com"
 gmail 1 sa -ur
+
+# Contacts
+gmail 1 cn
+gmail 1 cn -a "silvia" "xyz@hbc.com"
+gmail 1 cn -d "silvia"
+gmail 1 cn -e
 ```
 
 Reply flags:
@@ -149,6 +162,17 @@ Spam flow commands:
 - `sa "<spam_email1,spam_email2,...>"`: manually add one or more senders to `spam_senders`.
 - `sa -ur`: adds senders of all unread messages to `spam_senders` and trashes those unread messages.
 - Safety rule: `@gmail.com` sender addresses are never added to `spam_senders`.
+
+Contacts commands:
+- `cn` (no args): list contacts for the preset.
+- `cn -a <alias> <email>`: add/update a contact alias.
+- `cn -d <alias>`: delete a contact alias.
+- `cn -e`: open the config file in your editor.
+- Contact aliases can be used in `s`/`r` recipient fields (`To`, `-cc`, `-bcc`, and editor template fields).
+
+Bash completion:
+- Installer adds Bash completion for the `gmail` command only (not `python main.py`).
+- For `gmail <preset> s <TAB>`, completions include that preset's contact aliases and email addresses.
 
 Message utilities:
 - `mr <message_id>`: mark a single message as read.

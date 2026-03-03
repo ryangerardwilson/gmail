@@ -16,6 +16,7 @@ from gmail_cli.formatters import summarize_message
 from gmail_cli.gmail_api import (
     delete_message,
     get_thread_messages,
+    list_all_messages,
     list_messages,
     mark_message_read,
     reply_to_message,
@@ -249,8 +250,11 @@ def _handle_list(
     if params[0] == "-ura":
         if config_path is None or account is None:
             raise UsageError("Internal error: ls -ura requires account context")
-        max_results = _parse_optional_limit("ls -ura", params, default_limit)
-        messages = list_messages(service, "is:unread", max_results)
+        if len(params) == 1:
+            messages = list_all_messages(service, "is:unread")
+        else:
+            max_results = _parse_optional_limit("ls -ura", params, default_limit)
+            messages = list_messages(service, "is:unread", max_results)
         if not messages:
             print("No unread messages found.")
             return 0

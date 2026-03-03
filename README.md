@@ -119,7 +119,7 @@ Message utilities:
 - `-mr <message_id>`: mark a single message as read.
 - `-d <message_id>`: delete a single message.
 - `ls -ur [limit]`: list unread messages only; if `limit` is omitted, uses config default list limit.
-- `ls -ura [limit]`: interactive unread audit. For each unread message: `s` marks spam (adds sender to `spam_senders` and trashes message), `t` trashes message without spam-list update, `n` leaves message unread, `q` stops audit.
+- `ls -ura [limit]`: interactive unread audit. Without `limit`, audits all unread messages. For each unread message: `s` marks spam (adds sender to `spam_senders` and trashes message), `t` trashes message without spam-list update, `n` leaves message unread, `q` stops audit.
 
 ## First run auth
 

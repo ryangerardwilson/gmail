@@ -94,6 +94,28 @@ class MainCommandTests(unittest.TestCase):
         update_payload = update_mock.call_args.args[1]
         self.assertIn("spam@x.com", update_payload["1"]["spam_senders"])
 
+    def test_handle_list_unread_audit_no_limit_fetches_all(self) -> None:
+        service = MagicMock()
+        account = AccountConfig(
+            preset="1",
+            email="me@example.com",
+            client_secret_file=MagicMock(),
+            signature_file=MagicMock(),
+            spam_senders=[],
+            not_spam_senders=[],
+        )
+        with patch("main.list_all_messages", return_value=[] ) as list_all_mock:
+            code = _handle_list(
+                service,
+                ["-ura"],
+                default_limit=10,
+                my_email="me@example.com",
+                config_path="/tmp/config.json",
+                account=account,
+            )
+        self.assertEqual(code, 0)
+        list_all_mock.assert_called_once_with(service, "is:unread")
+
     def test_handle_list_unread_audit_trash_only(self) -> None:
         service = MagicMock()
         account = AccountConfig(

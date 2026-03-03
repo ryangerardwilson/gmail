@@ -74,6 +74,7 @@ Notes:
 ## Usage
 
 ```bash
+gmail -h
 gmail -v
 gmail -u
 gmail <preset> si
@@ -97,6 +98,10 @@ gmail <preset> ls -t <thread_id>
 gmail <preset> r [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 ```
+
+Help behavior:
+- `gmail -h`: shows full examples.
+- `gmail` (no args): shows compact usage only.
 
 Examples:
 
@@ -176,7 +181,11 @@ Contacts commands:
 
 Bash completion:
 - Installer adds Bash completion for the `gmail` command only (not `python main.py`).
-- For `gmail <preset> s <TAB>`, completions include that preset's contact aliases and email addresses.
+- For `gmail <preset> s <TAB>`, completions include that preset's contact aliases.
+
+Declarative query keywords for `ls "<query>"`:
+- `from`, `to`, `subject`, `after`, `before`, `unread`, `contains`, `limit`.
+- Example: `gmail 1 ls "from xyz limit 5"`.
 
 Message utilities:
 - `mr <message_id>`: mark a single message as read.

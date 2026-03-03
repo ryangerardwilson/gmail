@@ -91,12 +91,13 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_usage_guide() -> None:
-    print(
-        "\n".join(
+def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> None:
+    lines: list[str] = []
+    if show_usage:
+        lines.extend(
             [
-                "Gmail CLI Usage",
                 "",
+                "  gmail -h",
                 "  gmail -v",
                 "  gmail -u",
                 "  gmail <preset> si",
@@ -119,8 +120,13 @@ def _print_usage_guide() -> None:
                 "  gmail <preset> ls -t <thread_id>",
                 "  gmail <preset> r [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "  gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
+                ""
+            ]
+        )
+    if show_examples:
+        lines.extend(
+            [
                 "",
-                "Examples:",
                 "  # Send email",
                 "  gmail 1 s -e",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\"",
@@ -167,9 +173,10 @@ def _print_usage_guide() -> None:
                 "  gmail 1 cn -a \"silvia\" \"xyz@hbc.com\"",
                 "  gmail 1 cn -d \"silvia\"",
                 "  gmail 1 cn -e",
+                ""
             ]
         )
-    )
+    print("\n".join(lines))
 
 
 def _parse_recipient_csv(value: str, flag: str) -> list[str]:
@@ -962,8 +969,11 @@ def _upgrade_to_latest() -> int:
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
+    if argv and argv[0] == "-h":
+        _print_usage_guide(show_examples=True, show_usage=False)
+        return 0
     if not argv:
-        _print_usage_guide()
+        _print_usage_guide(show_examples=False, show_usage=True)
         return 0
     first = argv[0].lower()
     preset_required_commands = {"s", "-s", "ls", "r", "si", "sc", "sa", "mr", "d", "cn"}

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import base64
+import io
+import mimetypes
 from email.message import EmailMessage
 from email.utils import getaddresses
 from email.utils import parseaddr
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from typing import Any
+import zipfile
 
 from .errors import ApiError
 
@@ -66,17 +70,78 @@ def _extract_reply_recipients(
     return to_email, cc_recipients
 
 
+def _normalize_recipients(
+    recipients: list[str], my_email: str, exclude: set[str] | None = None
+) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    denied = {my_email.lower()}
+    if exclude:
+        denied.update(value.lower() for value in exclude)
+
+    for _, candidate in getaddresses(recipients):
+        candidate_clean = candidate.strip()
+        candidate_key = candidate_clean.lower()
+        if not candidate_clean or candidate_key in denied or candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        out.append(candidate_clean)
+    return out
+
+
+def _path_to_attachment(path: Path) -> tuple[str, bytes, str, str]:
+    if path.is_file():
+        data = path.read_bytes()
+        mime_type, _ = mimetypes.guess_type(path.name)
+        if mime_type:
+            maintype, subtype = mime_type.split("/", 1)
+        else:
+            maintype, subtype = "application", "octet-stream"
+        return path.name, data, maintype, subtype
+
+    if path.is_dir():
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for child in sorted(path.rglob("*")):
+                if child.is_file():
+                    zf.write(child, arcname=child.relative_to(path))
+        filename = f"{path.name or 'archive'}.zip"
+        return filename, archive.getvalue(), "application", "zip"
+
+    raise ApiError(f"Attachment path is neither file nor directory: {path}")
+
+
+def _attach_files(msg: EmailMessage, attachment_paths: list[Path]) -> None:
+    for path in attachment_paths:
+        filename, data, maintype, subtype = _path_to_attachment(path)
+        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename)
+
+
 def _build_reply_payload(
     original: dict[str, Any],
     from_email: str,
     body: str,
     source_label: str,
     reply_all: bool,
+    cc_emails: list[str],
+    bcc_emails: list[str],
+    attachment_paths: list[Path],
 ) -> dict[str, Any]:
     headers = _headers_to_map(original)
-    to_email, cc_recipients = _extract_reply_recipients(headers, from_email, reply_all)
+    to_email, inherited_cc = _extract_reply_recipients(headers, from_email, reply_all)
     if not to_email:
         raise ApiError(f"Could not determine recipient for reply to {source_label}")
+    my_email = from_email.strip().lower()
+    cc_recipients = _normalize_recipients(
+        inherited_cc + cc_emails,
+        my_email=my_email,
+        exclude={to_email},
+    )
+    bcc_recipients = _normalize_recipients(
+        bcc_emails,
+        my_email=my_email,
+        exclude={to_email, *cc_recipients},
+    )
 
     subject = _reply_subject(headers.get("subject", ""))
     source_message_id = headers.get("message-id", "")
@@ -90,11 +155,14 @@ def _build_reply_payload(
     reply["Subject"] = subject
     if cc_recipients:
         reply["Cc"] = ", ".join(cc_recipients)
+    if bcc_recipients:
+        reply["Bcc"] = ", ".join(bcc_recipients)
     if source_message_id:
         reply["In-Reply-To"] = source_message_id
     if references:
         reply["References"] = references
     reply.set_content(body)
+    _attach_files(reply, attachment_paths)
 
     return {
         "raw": _encode_message(reply),
@@ -102,12 +170,36 @@ def _build_reply_payload(
     }
 
 
-def send_email(service, from_email: str, to_email: str, subject: str, body: str) -> dict[str, Any]:
+def send_email(
+    service,
+    from_email: str,
+    to_email: str,
+    subject: str,
+    body: str,
+    cc_emails: list[str] | None = None,
+    bcc_emails: list[str] | None = None,
+    attachment_paths: list[Path] | None = None,
+) -> dict[str, Any]:
+    cc_emails = cc_emails or []
+    bcc_emails = bcc_emails or []
+    attachment_paths = attachment_paths or []
+    my_email = from_email.strip().lower()
+    to_clean = parseaddr(to_email)[1].strip()
+    cc_recipients = _normalize_recipients(cc_emails, my_email=my_email, exclude={to_clean})
+    bcc_recipients = _normalize_recipients(
+        bcc_emails, my_email=my_email, exclude={to_clean, *cc_recipients}
+    )
+
     msg = EmailMessage()
     msg["To"] = to_email
     msg["From"] = from_email
     msg["Subject"] = subject
+    if cc_recipients:
+        msg["Cc"] = ", ".join(cc_recipients)
+    if bcc_recipients:
+        msg["Bcc"] = ", ".join(bcc_recipients)
     msg.set_content(body)
+    _attach_files(msg, attachment_paths)
 
     payload = {"raw": _encode_message(msg)}
 
@@ -195,7 +287,13 @@ def reply_to_message(
     message_id: str,
     body: str,
     reply_all: bool = False,
+    cc_emails: list[str] | None = None,
+    bcc_emails: list[str] | None = None,
+    attachment_paths: list[Path] | None = None,
 ) -> dict[str, Any]:
+    cc_emails = cc_emails or []
+    bcc_emails = bcc_emails or []
+    attachment_paths = attachment_paths or []
     try:
         original = (
             service.users()
@@ -217,6 +315,9 @@ def reply_to_message(
         body,
         source_label=f"message '{message_id}'",
         reply_all=reply_all,
+        cc_emails=cc_emails,
+        bcc_emails=bcc_emails,
+        attachment_paths=attachment_paths,
     )
 
     try:
@@ -231,7 +332,13 @@ def reply_to_thread(
     thread_id: str,
     body: str,
     reply_all: bool = False,
+    cc_emails: list[str] | None = None,
+    bcc_emails: list[str] | None = None,
+    attachment_paths: list[Path] | None = None,
 ) -> dict[str, Any]:
+    cc_emails = cc_emails or []
+    bcc_emails = bcc_emails or []
+    attachment_paths = attachment_paths or []
     try:
         thread = (
             service.users()
@@ -268,6 +375,9 @@ def reply_to_thread(
         body,
         source_label=f"thread '{thread_id}'",
         reply_all=reply_all,
+        cc_emails=cc_emails,
+        bcc_emails=bcc_emails,
+        attachment_paths=attachment_paths,
     )
     payload["threadId"] = thread_id
 

@@ -52,22 +52,28 @@ Notes:
 ```bash
 python main.py -v
 python main.py -u
-python main.py <preset> s <to> <subject> <body>
+python main.py <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 python main.py <preset> ls <query>
 python main.py <preset> ls -t <thread_id>
-python main.py <preset> r [-a] <message_id> <body>
-python main.py <preset> r [-a] -t <thread_id> <body>
+python main.py <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
+python main.py <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 ```
 
 Examples:
 
 ```bash
 python main.py 1 s "xyz@example.com" "this is the subject" "this is the body"
+python main.py 1 s "xyz@example.com" "this is the subject" "this is the body" -cc "cc1@example.com,cc2@example.com" -bcc "audit@example.com"
+python main.py 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt"
+python main.py 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt" "/tmp/project_dir"
 python main.py 1 ls "from maanas limit 1"
 python main.py 1 ls "to silvia limit 1"
 python main.py 1 ls -t "19ca756c06a7ebcd"
 python main.py 1 r "18f3abc..." "Thanks, sharing this now."
 python main.py 1 r -a "18f3abc..." "Thanks everyone."
+python main.py 1 r "18f3abc..." "Adding context." -cc "manager@example.com" -bcc "audit@example.com"
+python main.py 1 r "18f3abc..." "Sharing the latest." -atch "/tmp/project_dir"
+python main.py 1 r -a "18f3abc..." "Please review." -atch "/tmp/notes.txt" "/tmp/project_dir"
 python main.py 1 r -t "19ca756c06a7ebcd" "Following up on this thread."
 python main.py 1 r -ta "19ca756c06a7ebcd" "Thanks all."
 ```
@@ -76,6 +82,9 @@ Reply flags:
 - `-a`: reply-all, keeps original Cc recipients (excluding your own address).
 - `-t`: treat target id as `thread_id` instead of `message_id`.
 - You can combine as `-ta` or `-at`.
+- `-cc`: add comma-separated recipients to Cc for send/reply (trailing option, after required args).
+- `-bcc`: add comma-separated recipients to Bcc for send/reply (trailing option, after required args).
+- `-atch`: attach one or more file/dir paths; directories are attached as generated `.zip` files (trailing option, after required args).
 
 ## First run auth
 

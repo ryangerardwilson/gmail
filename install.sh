@@ -95,17 +95,21 @@ else
   command -v curl >/dev/null 2>&1 || { print_message error "'curl' is required but not installed."; exit 1; }
   command -v tar  >/dev/null 2>&1 || { print_message error "'tar' is required but not installed."; exit 1; }
 
-  filename="${APP}-linux-x64.tar.gz"
   mkdir -p "$APP_DIR"
+  candidate_filenames=(
+    "${APP}-linux-x64.tar.gz"
+    "${APP}-linux-x86_64.tar.gz"
+    "${APP}-linux-amd64.tar.gz"
+  )
 
   if [[ -z "$requested_version" ]]; then
-    url="https://github.com/${REPO}/releases/latest/download/${filename}"
+    release_url_prefix="https://github.com/${REPO}/releases/latest/download"
     specific_version="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' || true)"
     [[ -n "$specific_version" ]] || specific_version="latest"
   else
     requested_version="${requested_version#v}"
-    url="https://github.com/${REPO}/releases/download/v${requested_version}/${filename}"
+    release_url_prefix="https://github.com/${REPO}/releases/download/v${requested_version}"
     specific_version="${requested_version}"
 
     http_status=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/${REPO}/releases/tag/v${requested_version}")
@@ -127,20 +131,42 @@ else
   print_message info "\n${MUTED}Installing ${NC}${APP} ${MUTED}version: ${NC}${specific_version}"
   tmp_dir="${TMPDIR:-/tmp}/${APP}_install_$$"
   mkdir -p "$tmp_dir"
+  archive_path=""
+  for filename in "${candidate_filenames[@]}"; do
+    url="${release_url_prefix}/${filename}"
+    if curl -# -fL -o "$tmp_dir/$filename" "$url"; then
+      archive_path="$tmp_dir/$filename"
+      break
+    fi
+  done
+  if [[ -z "$archive_path" ]]; then
+    print_message error "Could not download a supported Linux archive for this release."
+    print_message info  "Checked filenames: ${candidate_filenames[*]}"
+    print_message info  "${MUTED}See available release assets:${NC} https://github.com/${REPO}/releases"
+    exit 1
+  fi
+  if ! tar -tzf "$archive_path" >/dev/null 2>&1; then
+    print_message error "Downloaded asset is not a valid gzip tar archive: $(basename "$archive_path")"
+    print_message info  "${MUTED}See available release assets:${NC} https://github.com/${REPO}/releases"
+    exit 1
+  fi
 
-  curl -# -L -o "$tmp_dir/$filename" "$url"
-  tar -xzf "$tmp_dir/$filename" -C "$tmp_dir"
+  tar -xzf "$archive_path" -C "$tmp_dir"
 
-  if [[ ! -f "$tmp_dir/${APP}/${APP}" ]]; then
-    print_message error "Archive did not contain expected directory '${APP}/${APP}'"
-    print_message info  "Expected: $tmp_dir/${APP}/${APP}"
+  extracted_binary="$tmp_dir/${APP}/${APP}"
+  if [[ ! -f "$extracted_binary" ]]; then
+    extracted_binary="$(find "$tmp_dir" -type f -name "$APP" 2>/dev/null | head -n 1 || true)"
+  fi
+  if [[ -z "$extracted_binary" || ! -f "$extracted_binary" ]]; then
+    print_message error "Archive did not contain expected binary '${APP}'"
+    print_message info  "${MUTED}See available release assets:${NC} https://github.com/${REPO}/releases"
     exit 1
   fi
 
   rm -rf "$APP_DIR"
-  mkdir -p "$APP_DIR"
-
-  mv "$tmp_dir/${APP}" "$APP_DIR"
+  mkdir -p "$APP_DIR/${APP}"
+  cp "$extracted_binary" "$APP_DIR/${APP}/${APP}"
+  chmod 755 "$APP_DIR/${APP}/${APP}"
   rm -rf "$tmp_dir"
 
   cat > "${INSTALL_DIR}/${APP}" <<SHIM

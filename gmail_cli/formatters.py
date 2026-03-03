@@ -148,7 +148,7 @@ def _trim_body(body: str, max_lines: int = 24, max_chars: int = 2000) -> str:
     return body_text
 
 
-def summarize_message(message: dict[str, Any]) -> dict[str, str]:
+def summarize_message(message: dict[str, Any], trim_body: bool = True) -> dict[str, str]:
     headers = _header_map(message)
     from_raw = headers.get("from", "")
     from_name, from_email = parseaddr(from_raw)
@@ -161,8 +161,9 @@ def summarize_message(message: dict[str, Any]) -> dict[str, str]:
     if not isinstance(payload, dict):
         payload = {}
     body = _extract_text_plain(payload) or _extract_any_body(payload) or ""
-    body = _strip_quoted_history(body)
-    body = _trim_body(body)
+    if trim_body:
+        body = _strip_quoted_history(body)
+        body = _trim_body(body)
 
     return {
         "message_id": str(message.get("id", "")),
@@ -175,6 +176,7 @@ def summarize_message(message: dict[str, Any]) -> dict[str, str]:
         "subject": headers.get("subject", ""),
         "date": _to_ist_date(headers.get("date", "")),
         "body": body.strip() or str(message.get("snippet", "")).strip(),
+        "snippet": str(message.get("snippet", "")).strip(),
     }
 
 
@@ -201,21 +203,33 @@ def render_messages_table(messages: list[dict[str, Any]], my_email: str) -> str:
             f"thread_id : {row['thread_id']}",
             f"date_ist  : {row['date']}",
             f"from      : {row['from']}",
-            f"to        : {row['to']}",
+            f"subject   : {row['subject']}",
         ]
-        if row["cc"].strip():
-            lines.append(f"cc        : {row['cc']}")
-        if row["bcc"].strip():
-            lines.append(f"bcc       : {row['bcc']}")
-        lines.extend(
-            [
-                f"subject   : {row['subject']}",
-                "body:",
-                "",
-                row["body"],
-            ]
-        )
         section = "\n".join(lines)
         sections.append(_apply_color(section, row["from_email"] == my_email_normalized))
 
     return "\n".join(sections)
+
+
+def render_message_open(message: dict[str, Any], my_email: str) -> str:
+    row = summarize_message(message, trim_body=False)
+    lines = [
+        f"message_id: {row['message_id']}",
+        f"thread_id : {row['thread_id']}",
+        f"date_ist  : {row['date']}",
+        f"from      : {row['from']}",
+        f"to        : {row['to']}",
+    ]
+    if row["cc"].strip():
+        lines.append(f"cc        : {row['cc']}")
+    if row["bcc"].strip():
+        lines.append(f"bcc       : {row['bcc']}")
+    lines.extend(
+        [
+            f"subject   : {row['subject']}",
+            "body:",
+            "",
+            row["body"],
+        ]
+    )
+    return _apply_color("\n".join(lines), row["from_email"] == my_email.strip().lower())

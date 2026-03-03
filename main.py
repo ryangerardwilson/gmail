@@ -19,15 +19,19 @@ from gmail_cli.config import (
     update_account_sender_lists,
 )
 from gmail_cli.errors import ConfigError, GmailCliError, UsageError
-from gmail_cli.formatters import render_messages_table
+from gmail_cli.formatters import render_message_open, render_messages_table
 from gmail_cli.formatters import summarize_message
 from gmail_cli.gmail_api import (
+    batch_mark_messages_read,
     batch_delete_messages,
     delete_message,
+    download_message_attachments,
+    get_message,
     get_thread_messages,
     list_messages,
     list_messages_page,
     mark_message_read,
+    mark_message_unread,
     reply_to_message,
     reply_to_thread,
     send_email,
@@ -57,13 +61,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> cn -a <alias> <email>\n"
             "gmail <preset> cn -d <alias>\n"
             "gmail <preset> cn -e\n"
+            "gmail <preset> o <message_id>\n"
+            "gmail <preset> o -t <thread_id>\n"
             "gmail <preset> mr <message_id>\n"
+            "gmail <preset> mur <message_id>\n"
             "gmail <preset> d <message_id>\n"
+            "gmail <preset> ms <message_id>\n"
             "gmail <preset> s -e\n"
             "gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "gmail <preset> ls <query>\n"
             "gmail <preset> ls -ur [limit]\n"
             "gmail <preset> ls -r [limit]\n"
+            "gmail <preset> ls -snt [limit|query]\n"
             "gmail <preset> ls -ura [limit]\n"
             "gmail <preset> ls -ra [limit]\n"
             "gmail <preset> ls -t <thread_id>\n"
@@ -86,7 +95,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "preset", nargs="?", help="Account preset key from config.json, e.g. 1"
     )
-    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | mr | d | si | sc | sa | cn")
+    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | o | mr | mur | d | ms | si | sc | sa | cn")
     parser.add_argument("params", nargs=argparse.REMAINDER, help="Command parameters")
     return parser
 
@@ -108,13 +117,18 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail <preset> cn -a <alias> <email>",
                 "  gmail <preset> cn -d <alias>",
                 "  gmail <preset> cn -e",
+                "  gmail <preset> o <message_id>",
+                "  gmail <preset> o -t <thread_id>",
                 "  gmail <preset> mr <message_id>",
+                "  gmail <preset> mur <message_id>",
                 "  gmail <preset> d <message_id>",
+                "  gmail <preset> ms <message_id>",
                 "  gmail <preset> s -e",
                 "  gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "  gmail <preset> ls <query>",
                 "  gmail <preset> ls -ur [limit]",
                 "  gmail <preset> ls -r [limit]",
+                "  gmail <preset> ls -snt [limit|query]",
                 "  gmail <preset> ls -ura [limit]",
                 "  gmail <preset> ls -ra [limit]",
                 "  gmail <preset> ls -t <thread_id>",
@@ -141,6 +155,8 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 ls -ur 1",
                 "  gmail 1 ls -r",
                 "  gmail 1 ls -r 1",
+                "  gmail 1 ls -snt 10",
+                "  gmail 1 ls -snt \"silvia\"",
                 "  # Audit unread emails",
                 "  gmail 1 ls -ura 10",
                 "  # Audit read emails",
@@ -149,8 +165,12 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 ls -t \"19ca756c06a7ebcd\"",
                 "",
                 "  # Single-message utilities",
+                "  gmail 1 o \"19caef2cd6494116\"",
+                "  gmail 1 o -t \"19ca756c06a7ebcd\"",
                 "  gmail 1 mr \"19caef2cd6494116\"",
+                "  gmail 1 mur \"19caef2cd6494116\"",
                 "  gmail 1 d \"19caef2cd6494116\"",
+                "  gmail 1 ms \"19caef2cd6494116\"",
                 "",
                 "  # Reply",
                 "  gmail 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
@@ -495,7 +515,30 @@ def _handle_list(
 
     if params[0] == "-r":
         max_results = _parse_optional_limit("ls -r", params, default_limit)
-        messages = list_messages(service, "is:read", max_results)
+        messages = list_messages(service, f"is:read -from:{my_email}", max_results)
+        print(render_messages_table(messages, my_email))
+        return 0
+
+    if params[0] == "-snt":
+        if len(params) == 1:
+            messages = list_messages(service, "in:sent", default_limit)
+            print(render_messages_table(messages, my_email))
+            return 0
+        if len(params) == 2:
+            try:
+                max_results = int(params[1])
+            except ValueError:
+                max_results = -1
+            if max_results > 0:
+                messages = list_messages(service, "in:sent", max_results)
+                print(render_messages_table(messages, my_email))
+                return 0
+            if max_results == 0:
+                raise UsageError("ls -snt limit must be > 0")
+
+        sent_query = "in:sent " + " ".join(params[1:])
+        parsed = parse_declarative_query(sent_query, default_limit)
+        messages = list_messages(service, parsed.gmail_query, parsed.max_results)
         print(render_messages_table(messages, my_email))
         return 0
 
@@ -853,12 +896,97 @@ def _handle_mark_read(service, params: list[str]) -> int:
     return 0
 
 
+def _handle_open_message(service, params: list[str], my_email: str) -> int:
+    if not params:
+        raise UsageError("o requires: <message_id> or -t <thread_id>")
+
+    use_thread = False
+    index = 0
+    if params[0].startswith("-"):
+        if params[0] != "-t":
+            raise UsageError("o supports only optional flag: -t")
+        use_thread = True
+        index = 1
+
+    if len(params[index:]) != 1:
+        raise UsageError("o requires exactly one id: <message_id> or -t <thread_id>")
+    target_id = params[index]
+
+    if not use_thread:
+        message = get_message(service, target_id, format_type="full")
+        downloaded = download_message_attachments(service, message, Path.cwd())
+        response = mark_message_read(service, target_id)
+        print(render_message_open(message, my_email))
+        if downloaded:
+            print(f"attachments_downloaded={len(downloaded)} cwd={Path.cwd()}")
+            for path in downloaded:
+                print(f"attachment: {path.name}")
+        print(
+            f"opened_and_marked_read message_id={response.get('id')} thread_id={response.get('threadId')}"
+        )
+        return 0
+
+    messages = get_thread_messages(service, target_id)
+    if not messages:
+        print(f"no messages found in thread_id={target_id}")
+        return 0
+
+    all_downloaded: list[Path] = []
+    message_ids: list[str] = []
+    for idx, message in enumerate(messages, start=1):
+        message_id = str(message.get("id", "")).strip()
+        if message_id:
+            message_ids.append(message_id)
+        all_downloaded.extend(download_message_attachments(service, message, Path.cwd()))
+        print(f"[{idx}/{len(messages)}]")
+        print(render_message_open(message, my_email))
+        if idx < len(messages):
+            print("")
+
+    marked_read = batch_mark_messages_read(service, message_ids)
+    if all_downloaded:
+        print(f"attachments_downloaded={len(all_downloaded)} cwd={Path.cwd()}")
+        for path in all_downloaded:
+            print(f"attachment: {path.name}")
+    print(
+        f"opened_thread thread_id={target_id} messages={len(messages)} marked_read={marked_read}"
+    )
+    return 0
+
+
+def _handle_mark_unread(service, params: list[str]) -> int:
+    if len(params) != 1:
+        raise UsageError("mur requires exactly 1 param: <message_id>")
+    message_id = params[0]
+    response = mark_message_unread(service, message_id)
+    print(f"marked_unread message_id={response.get('id')} thread_id={response.get('threadId')}")
+    return 0
+
+
 def _handle_delete(service, params: list[str]) -> int:
     if len(params) != 1:
         raise UsageError("d requires exactly 1 param: <message_id>")
     message_id = params[0]
     delete_message(service, message_id)
     print(f"deleted message_id={message_id}")
+    return 0
+
+
+def _handle_mark_spammer(config, account, service, params: list[str]) -> int:
+    if len(params) != 1:
+        raise UsageError("ms requires exactly 1 param: <message_id>")
+    message_id = params[0]
+    message = get_message(service, message_id, format_type="metadata", metadata_headers=["From"])
+    row = summarize_message(message)
+    sender = parseaddr(row.get("from", ""))[1].strip().lower() or row.get("from_email", "").strip().lower()
+    if sender:
+        merged = _merge_unique(account.spam_senders, [sender])
+        update_account_sender_lists(config.path, {account.preset: merged})
+    delete_message(service, message_id)
+    if sender:
+        print(f"marked_spammer sender={sender} trashed_message_id={message_id}")
+    else:
+        print(f"trashed_message_id={message_id} (sender not detected)")
     return 0
 
 
@@ -976,7 +1104,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_usage_guide(show_examples=False, show_usage=True)
         return 0
     first = argv[0].lower()
-    preset_required_commands = {"s", "-s", "ls", "r", "si", "sc", "sa", "mr", "d", "cn"}
+    preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "mr", "mur", "d", "ms", "cn"}
     if first in preset_required_commands:
         hint = " ".join(argv)
         raise UsageError(
@@ -1019,11 +1147,20 @@ def main(argv: list[str] | None = None) -> int:
         signature = _read_signature(account.signature_file)
         return _handle_reply(service, account.email, args.params, signature, account.contacts)
 
+    if command == "o":
+        return _handle_open_message(service, args.params, account.email)
+
     if command == "mr":
         return _handle_mark_read(service, args.params)
 
+    if command == "mur":
+        return _handle_mark_unread(service, args.params)
+
     if command == "d":
         return _handle_delete(service, args.params)
+
+    if command == "ms":
+        return _handle_mark_spammer(config, account, service, args.params)
 
     if command == "si":
         if args.params:
@@ -1039,7 +1176,7 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_spam_add(config, account, service, args.params)
 
     raise UsageError(
-        f"Unknown command '{args.command}'. Use s, ls, r, mr, d, si, sc, sa, or cn."
+        f"Unknown command '{args.command}'. Use s, ls, r, o, mr, mur, d, ms, si, sc, sa, or cn."
     )
 
 

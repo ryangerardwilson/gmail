@@ -6,7 +6,10 @@ from gmail_cli.errors import UsageError
 from main import (
     _handle_delete,
     _handle_list,
+    _handle_mark_spammer,
     _handle_mark_read,
+    _handle_mark_unread,
+    _handle_open_message,
     _parse_editor_template,
     _handle_reply,
     _handle_send,
@@ -245,7 +248,7 @@ class MainCommandTests(unittest.TestCase):
         ):
             code = _handle_list(service, ["-r"], default_limit=10, my_email="me@example.com")
         self.assertEqual(code, 0)
-        list_messages_mock.assert_called_once_with(service, "is:read", 10)
+        list_messages_mock.assert_called_once_with(service, "is:read -from:me@example.com", 10)
 
     def test_handle_list_read_custom_limit(self) -> None:
         service = MagicMock()
@@ -253,7 +256,34 @@ class MainCommandTests(unittest.TestCase):
             "main.render_messages_table", return_value="table"
         ):
             _handle_list(service, ["-r", "1"], default_limit=10, my_email="me@example.com")
-        list_messages_mock.assert_called_once_with(service, "is:read", 1)
+        list_messages_mock.assert_called_once_with(service, "is:read -from:me@example.com", 1)
+
+    def test_handle_list_sent_default_limit(self) -> None:
+        service = MagicMock()
+        with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            code = _handle_list(service, ["-snt"], default_limit=10, my_email="me@example.com")
+        self.assertEqual(code, 0)
+        list_messages_mock.assert_called_once_with(service, "in:sent", 10)
+
+    def test_handle_list_sent_custom_limit(self) -> None:
+        service = MagicMock()
+        with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            _handle_list(service, ["-snt", "10"], default_limit=5, my_email="me@example.com")
+        list_messages_mock.assert_called_once_with(service, "in:sent", 10)
+
+    def test_handle_list_sent_query(self) -> None:
+        service = MagicMock()
+        with patch("main.parse_declarative_query") as parse_mock, patch(
+            "main.list_messages", return_value=[]
+        ) as list_messages_mock, patch("main.render_messages_table", return_value="table"):
+            parse_mock.return_value = MagicMock(gmail_query="in:sent silvia", max_results=7)
+            _handle_list(service, ["-snt", "silvia"], default_limit=5, my_email="me@example.com")
+        parse_mock.assert_called_once_with("in:sent silvia", 5)
+        list_messages_mock.assert_called_once_with(service, "in:sent silvia", 7)
 
     def test_handle_mark_read(self) -> None:
         service = MagicMock()
@@ -267,6 +297,62 @@ class MainCommandTests(unittest.TestCase):
         with patch("main.delete_message") as delete_mock:
             code = _handle_delete(service, ["m1"])
         self.assertEqual(code, 0)
+        delete_mock.assert_called_once_with(service, "m1")
+
+    def test_handle_open_message(self) -> None:
+        service = MagicMock()
+        with patch("main.get_message", return_value={"id": "m1", "threadId": "t1"}), patch(
+            "main.download_message_attachments", return_value=[]
+        ) as dl_mock, patch(
+            "main.mark_message_read", return_value={"id": "m1", "threadId": "t1"}
+        ) as mark_mock, patch("main.render_message_open", return_value="opened"):
+            code = _handle_open_message(service, ["m1"], "me@example.com")
+        self.assertEqual(code, 0)
+        dl_mock.assert_called_once()
+        mark_mock.assert_called_once_with(service, "m1")
+
+    def test_handle_open_thread(self) -> None:
+        service = MagicMock()
+        messages = [{"id": "m1", "threadId": "t1"}, {"id": "m2", "threadId": "t1"}]
+        with patch("main.get_thread_messages", return_value=messages), patch(
+            "main.download_message_attachments", side_effect=[[Path("/tmp/a")], []]
+        ) as dl_mock, patch(
+            "main.batch_mark_messages_read", return_value=2
+        ) as mark_batch_mock, patch(
+            "main.render_message_open", return_value="opened"
+        ):
+            code = _handle_open_message(service, ["-t", "t1"], "me@example.com")
+        self.assertEqual(code, 0)
+        self.assertEqual(dl_mock.call_count, 2)
+        mark_batch_mock.assert_called_once_with(service, ["m1", "m2"])
+
+    def test_handle_mark_unread(self) -> None:
+        service = MagicMock()
+        with patch("main.mark_message_unread", return_value={"id": "m1", "threadId": "t1"}) as mark_mock:
+            code = _handle_mark_unread(service, ["m1"])
+        self.assertEqual(code, 0)
+        mark_mock.assert_called_once_with(service, "m1")
+
+    def test_handle_mark_spammer(self) -> None:
+        service = MagicMock()
+        account = AccountConfig(
+            preset="1",
+            email="me@example.com",
+            client_secret_file=MagicMock(),
+            signature_file=MagicMock(),
+            spam_senders=[],
+        )
+        config = MagicMock()
+        config.path = Path("/tmp/config.json")
+        with patch(
+            "main.get_message",
+            return_value={"payload": {"headers": [{"name": "From", "value": "Spam <spam@x.com>"}]}},
+        ), patch("main.update_account_sender_lists") as update_mock, patch(
+            "main.delete_message"
+        ) as delete_mock:
+            code = _handle_mark_spammer(config, account, service, ["m1"])
+        self.assertEqual(code, 0)
+        update_mock.assert_called_once_with(Path("/tmp/config.json"), {"1": ["spam@x.com"]})
         delete_mock.assert_called_once_with(service, "m1")
 
     def test_upgrade_rejects_extra_args(self) -> None:

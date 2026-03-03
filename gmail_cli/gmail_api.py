@@ -20,6 +20,11 @@ def _encode_message(message: EmailMessage) -> str:
     return raw
 
 
+def _decode_base64_url(data: str) -> bytes:
+    pad = "=" * ((4 - len(data) % 4) % 4)
+    return base64.urlsafe_b64decode(data + pad)
+
+
 def _headers_to_map(message: dict[str, Any]) -> dict[str, str]:
     out: dict[str, str] = {}
     for item in message.get("payload", {}).get("headers", []):
@@ -243,6 +248,109 @@ def list_messages(service, gmail_query: str, max_results: int) -> list[dict[str,
         results.append(details)
 
     return results
+
+
+def get_message(
+    service,
+    message_id: str,
+    format_type: str = "full",
+    metadata_headers: list[str] | None = None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"userId": "me", "id": message_id, "format": format_type}
+    if metadata_headers:
+        kwargs["metadataHeaders"] = metadata_headers
+    try:
+        return service.users().messages().get(**kwargs).execute()
+    except Exception as exc:  # pragma: no cover
+        raise ApiError(f"Failed to fetch message '{message_id}': {exc}") from exc
+
+
+def _attachment_parts(payload: dict[str, Any]) -> list[tuple[str, str | None, str | None]]:
+    out: list[tuple[str, str | None, str | None]] = []
+    filename = str(payload.get("filename", "")).strip()
+    body = payload.get("body", {})
+    if not isinstance(body, dict):
+        body = {}
+    attachment_id = body.get("attachmentId")
+    inline_data = body.get("data")
+    if filename and (isinstance(attachment_id, str) or isinstance(inline_data, str)):
+        out.append(
+            (
+                Path(filename).name or "attachment",
+                attachment_id if isinstance(attachment_id, str) else None,
+                inline_data if isinstance(inline_data, str) else None,
+            )
+        )
+
+    parts = payload.get("parts", [])
+    if isinstance(parts, list):
+        for part in parts:
+            if isinstance(part, dict):
+                out.extend(_attachment_parts(part))
+    return out
+
+
+def _unique_attachment_path(target_dir: Path, filename: str) -> Path:
+    clean_name = Path(filename).name or "attachment"
+    candidate = target_dir / clean_name
+    if not candidate.exists():
+        return candidate
+
+    stem = Path(clean_name).stem or "attachment"
+    suffix = Path(clean_name).suffix
+    index = 1
+    while True:
+        candidate = target_dir / f"{stem}_{index}{suffix}"
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def download_message_attachments(
+    service,
+    message: dict[str, Any],
+    target_dir: Path,
+) -> list[Path]:
+    message_id = str(message.get("id", "")).strip()
+    if not message_id:
+        return []
+    payload = message.get("payload", {})
+    if not isinstance(payload, dict):
+        return []
+
+    attachment_specs = _attachment_parts(payload)
+    if not attachment_specs:
+        return []
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    downloaded: list[Path] = []
+    for filename, attachment_id, inline_data in attachment_specs:
+        if attachment_id:
+            try:
+                response = (
+                    service.users()
+                    .messages()
+                    .attachments()
+                    .get(userId="me", messageId=message_id, id=attachment_id)
+                    .execute()
+                )
+            except Exception as exc:  # pragma: no cover
+                raise ApiError(
+                    f"Failed to download attachment '{filename}' from message '{message_id}': {exc}"
+                ) from exc
+            raw_data = response.get("data")
+            if not isinstance(raw_data, str):
+                continue
+            data = _decode_base64_url(raw_data)
+        elif inline_data:
+            data = _decode_base64_url(inline_data)
+        else:
+            continue
+
+        out_path = _unique_attachment_path(target_dir, filename)
+        out_path.write_bytes(data)
+        downloaded.append(out_path)
+    return downloaded
 
 
 def list_all_messages(service, gmail_query: str) -> list[dict[str, Any]]:
@@ -609,6 +717,22 @@ def mark_message_read(service, message_id: str) -> dict[str, Any]:
         )
     except Exception as exc:  # pragma: no cover
         raise ApiError(f"Failed to mark message '{message_id}' as read: {exc}") from exc
+
+
+def mark_message_unread(service, message_id: str) -> dict[str, Any]:
+    try:
+        return (
+            service.users()
+            .messages()
+            .modify(
+                userId="me",
+                id=message_id,
+                body={"addLabelIds": ["UNREAD"]},
+            )
+            .execute()
+        )
+    except Exception as exc:  # pragma: no cover
+        raise ApiError(f"Failed to mark message '{message_id}' as unread: {exc}") from exc
 
 
 def delete_message(service, message_id: str) -> None:

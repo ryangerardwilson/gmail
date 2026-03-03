@@ -85,13 +85,18 @@ gmail <preset> cn
 gmail <preset> cn -a <alias> <email>
 gmail <preset> cn -d <alias>
 gmail <preset> cn -e
+gmail <preset> o <message_id>
+gmail <preset> o -t <thread_id>
 gmail <preset> mr <message_id>
+gmail <preset> mur <message_id>
 gmail <preset> d <message_id>
+gmail <preset> ms <message_id>
 gmail <preset> s -e
 gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 gmail <preset> ls <query>
 gmail <preset> ls -ur [limit]
 gmail <preset> ls -r [limit]
+gmail <preset> ls -snt [limit|query]
 gmail <preset> ls -ura [limit]
 gmail <preset> ls -ra [limit]
 gmail <preset> ls -t <thread_id>
@@ -120,6 +125,8 @@ gmail 1 ls -ur
 gmail 1 ls -ur 1
 gmail 1 ls -r
 gmail 1 ls -r 1
+gmail 1 ls -snt 10
+gmail 1 ls -snt "silvia"
 # Audit unread emails
 gmail 1 ls -ura 10
 # Audit read emails
@@ -128,8 +135,12 @@ gmail 1 ls "to silvia limit 1"
 gmail 1 ls -t "19ca756c06a7ebcd"
 
 # Single-message utilities
+gmail 1 o "18f3abc..."
+gmail 1 o -t "19ca756c06a7ebcd"
 gmail 1 mr "18f3abc..."
+gmail 1 mur "18f3abc..."
 gmail 1 d "18f3abc..."
+gmail 1 ms "18f3abc..."
 
 # Reply
 gmail 1 r "18f3abc..." "Thanks, sharing this now."
@@ -188,10 +199,16 @@ Declarative query keywords for `ls "<query>"`:
 - Example: `gmail 1 ls "from xyz limit 5"`.
 
 Message utilities:
+- `o <message_id>`: open one message with full body output, mark it as read, and download attachments to current working directory.
+- `o -t <thread_id>`: open all messages in a thread (ascending order), apply existing color formatting per message, mark all thread messages as read, and download attachments to current working directory.
 - `mr <message_id>`: mark a single message as read.
+- `mur <message_id>`: mark a single message as unread.
 - `d <message_id>`: delete a single message.
+- `ms <message_id>`: mark sender as spam (adds sender to `spam_senders` subject to safety normalization) and trashes the message.
 - `ls -ur [limit]`: list unread messages only; if `limit` is omitted, uses config default list limit.
-- `ls -r [limit]`: list read messages only; if `limit` is omitted, uses config default list limit.
+- `ls -r [limit]`: list read received messages only (excludes sent); if `limit` is omitted, uses config default list limit.
+- `ls -snt [limit|query]`: list/search sent messages. If `limit` is numeric, it limits sent results. Otherwise it is treated as a sent query.
+- `ls` output is summary-only (message metadata). Use `o` to view full body.
 - `ls -ura [limit]`: interactive unread audit. Without `limit`, audits all unread messages continuously in batches of 10. For each unread message: `s` marks spam (adds sender to `spam_senders` and trashes message), `t` trashes message without spam-list update, `n` leaves message unread, `q` stops audit.
 - `ls -ra [limit]`: interactive read-mail audit with the same actions as `-ura`; without `limit`, processes read messages continuously in batches of 10.
 - Safety rule: both `-ura` and `-ra` never trash emails from `@gmail.com` senders.

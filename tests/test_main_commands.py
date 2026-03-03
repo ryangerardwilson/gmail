@@ -8,6 +8,7 @@ from main import (
     _handle_list,
     _handle_mark_read,
     _parse_editor_template,
+    _handle_reply,
     _handle_send,
     main,
 )
@@ -35,9 +36,10 @@ class MainCommandTests(unittest.TestCase):
         self.assertEqual(parsed[2], "Line1\nLine2")
         self.assertEqual(parsed[3], ["cc1@example.com", "cc2@example.com"])
         self.assertEqual(parsed[4], ["audit@example.com"])
+        self.assertEqual(parsed[5], [])
 
     def test_parse_editor_template_missing_fields_is_allowed(self) -> None:
-        to_email, subject, body, cc_emails, bcc_emails = _parse_editor_template(
+        to_email, subject, body, cc_emails, bcc_emails, attachment_paths = _parse_editor_template(
             "Subject: x\nBody:\nhello"
         )
         self.assertEqual(to_email, "")
@@ -45,6 +47,14 @@ class MainCommandTests(unittest.TestCase):
         self.assertEqual(body, "hello")
         self.assertEqual(cc_emails, [])
         self.assertEqual(bcc_emails, [])
+        self.assertEqual(attachment_paths, [])
+
+    def test_parse_editor_template_attachment_csv(self) -> None:
+        with patch("main._parse_attachment_path", side_effect=[Path("/tmp/a"), Path("/tmp/b")]):
+            _, _, _, _, _, attachment_paths = _parse_editor_template(
+                'To: x@y.com\nSubject: hi\nAttachments: "/tmp/a, /tmp/b"\nBody:\nbody'
+            )
+        self.assertEqual(attachment_paths, [Path("/tmp/a"), Path("/tmp/b")])
 
     def test_handle_send_editor_mode(self) -> None:
         service = MagicMock()
@@ -56,28 +66,76 @@ class MainCommandTests(unittest.TestCase):
                 "Body",
                 ["cc@example.com"],
                 ["bcc@example.com"],
+                [Path("/tmp/a")],
             ),
         ) as editor_mock, patch("main.send_email", return_value={"id": "m1", "threadId": "t1"}) as send_mock:
-            code = _handle_send(service, "me@example.com", ["-v"], "sig")
+            code = _handle_send(service, "me@example.com", ["-e"], "sig")
 
         self.assertEqual(code, 0)
-        editor_mock.assert_called_once_with("me@example.com", "sig")
+        editor_mock.assert_called_once_with("me@example.com", "sig", include_to_subject=True)
         send_mock.assert_called_once()
         args, kwargs = send_mock.call_args
         self.assertEqual(args[2], "to@example.com")
         self.assertEqual(kwargs["cc_emails"], ["cc@example.com"])
         self.assertEqual(kwargs["bcc_emails"], ["bcc@example.com"])
-        self.assertEqual(kwargs["attachment_paths"], [])
+        self.assertEqual(kwargs["attachment_paths"], [Path("/tmp/a")])
 
     def test_handle_send_editor_mode_missing_required_fields_cancels(self) -> None:
         service = MagicMock()
         with patch(
             "main._open_editor_template",
-            return_value=("", "Subject", "Body", [], []),
+            return_value=("", "Subject", "Body", [], [], []),
         ), patch("main.send_email") as send_mock:
-            code = _handle_send(service, "me@example.com", ["-v"], "sig")
+            code = _handle_send(service, "me@example.com", ["-e"], "sig")
         self.assertEqual(code, 0)
         send_mock.assert_not_called()
+
+    def test_handle_reply_editor_mode(self) -> None:
+        service = MagicMock()
+        with patch(
+            "main._open_editor_template",
+            return_value=(
+                "",
+                "",
+                "Reply body",
+                ["cc-from-editor@example.com"],
+                ["bcc-from-editor@example.com"],
+                [Path("/tmp/attach-from-editor")],
+            ),
+        ) as editor_mock, patch(
+            "main._parse_attachment_path",
+            return_value=Path("/tmp/attach-cli"),
+        ), patch(
+            "main.reply_to_message",
+            return_value={"id": "m1", "threadId": "t1"},
+        ) as reply_mock:
+            code = _handle_reply(
+                service,
+                "me@example.com",
+                ["-e", "msg1", "-cc", "cc-cli@example.com", "-atch", "/tmp/attach-cli"],
+                "sig",
+            )
+        self.assertEqual(code, 0)
+        editor_mock.assert_called_once_with("me@example.com", "sig", include_to_subject=False)
+        reply_mock.assert_called_once()
+        args, kwargs = reply_mock.call_args
+        self.assertEqual(args[2], "msg1")
+        self.assertEqual(kwargs["cc_emails"], ["cc-from-editor@example.com", "cc-cli@example.com"])
+        self.assertEqual(kwargs["bcc_emails"], ["bcc-from-editor@example.com"])
+        self.assertEqual(
+            kwargs["attachment_paths"],
+            [Path("/tmp/attach-from-editor"), Path("/tmp/attach-cli")],
+        )
+
+    def test_handle_reply_editor_mode_empty_body_cancels(self) -> None:
+        service = MagicMock()
+        with patch(
+            "main._open_editor_template",
+            return_value=("", "", "", [], [], []),
+        ), patch("main.reply_to_message") as reply_mock:
+            code = _handle_reply(service, "me@example.com", ["-e", "msg1"], "sig")
+        self.assertEqual(code, 0)
+        reply_mock.assert_not_called()
 
     def test_handle_list_unread_default_limit(self) -> None:
         service = MagicMock()

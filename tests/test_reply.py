@@ -18,7 +18,7 @@ def _decode_raw(raw: str):
 
 class ReplyParsingTests(unittest.TestCase):
     def test_parse_reply_args_clustered_flags(self) -> None:
-        use_thread, reply_all, target_id, body, cc_emails, bcc_emails, attachment_paths = _parse_reply_args(
+        use_thread, reply_all, use_editor, target_id, body, cc_emails, bcc_emails, attachment_paths = _parse_reply_args(
             [
                 "-ta",
                 "thread123",
@@ -34,6 +34,7 @@ class ReplyParsingTests(unittest.TestCase):
         )
         self.assertTrue(use_thread)
         self.assertTrue(reply_all)
+        self.assertFalse(use_editor)
         self.assertEqual(target_id, "thread123")
         self.assertEqual(body, "hello")
         self.assertEqual(cc_emails, ["a@example.com", "b@example.com"])
@@ -41,11 +42,12 @@ class ReplyParsingTests(unittest.TestCase):
         self.assertEqual([str(path) for path in attachment_paths], [str(Path("/tmp")), str(Path("/tmp"))])
 
     def test_parse_reply_args_message_default(self) -> None:
-        use_thread, reply_all, target_id, body, cc_emails, bcc_emails, attachment_paths = _parse_reply_args(
+        use_thread, reply_all, use_editor, target_id, body, cc_emails, bcc_emails, attachment_paths = _parse_reply_args(
             ["msg123", "hello"]
         )
         self.assertFalse(use_thread)
         self.assertFalse(reply_all)
+        self.assertFalse(use_editor)
         self.assertEqual(target_id, "msg123")
         self.assertEqual(body, "hello")
         self.assertEqual(cc_emails, [])
@@ -55,6 +57,19 @@ class ReplyParsingTests(unittest.TestCase):
     def test_parse_reply_args_invalid_flag(self) -> None:
         with self.assertRaises(UsageError):
             _parse_reply_args(["-x", "id", "body"])
+
+    def test_parse_reply_args_editor_mode(self) -> None:
+        use_thread, reply_all, use_editor, target_id, body, cc_emails, bcc_emails, attachment_paths = _parse_reply_args(
+            ["-ae", "msg123", "-cc", "x@example.com"]
+        )
+        self.assertFalse(use_thread)
+        self.assertTrue(reply_all)
+        self.assertTrue(use_editor)
+        self.assertEqual(target_id, "msg123")
+        self.assertEqual(body, "")
+        self.assertEqual(cc_emails, ["x@example.com"])
+        self.assertEqual(bcc_emails, [])
+        self.assertEqual(attachment_paths, [])
 
 
 class SendParsingTests(unittest.TestCase):

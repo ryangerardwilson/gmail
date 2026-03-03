@@ -54,15 +54,15 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> sa -ur\n"
             "gmail <preset> mr <message_id>\n"
             "gmail <preset> d <message_id>\n"
-            "gmail <preset> s -v\n"
+            "gmail <preset> s -e\n"
             "gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "gmail <preset> ls <query>\n"
             "gmail <preset> ls -ur [limit]\n"
             "gmail <preset> ls -ura [limit]\n"
             "gmail <preset> ls -ra [limit]\n"
             "gmail <preset> ls -t <thread_id>\n"
-            "gmail <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
-            "gmail <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
+            "gmail <preset> r [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
+            "gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
         ),
     )
     parser.add_argument(
@@ -99,19 +99,19 @@ def _print_usage_guide() -> None:
                 "  gmail <preset> sa -ur",
                 "  gmail <preset> mr <message_id>",
                 "  gmail <preset> d <message_id>",
-                "  gmail <preset> s -v",
+                "  gmail <preset> s -e",
                 "  gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "  gmail <preset> ls <query>",
                 "  gmail <preset> ls -ur [limit]",
                 "  gmail <preset> ls -ura [limit]",
                 "  gmail <preset> ls -ra [limit]",
                 "  gmail <preset> ls -t <thread_id>",
-                "  gmail <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
-                "  gmail <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
+                "  gmail <preset> r [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
+                "  gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "",
                 "Examples:",
                 "  # Send email",
-                "  gmail 1 s -v",
+                "  gmail 1 s -e",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\"",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -cc \"cc1@example.com,cc2@example.com\" -bcc \"audit@example.com\"",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\"",
@@ -134,6 +134,7 @@ def _print_usage_guide() -> None:
                 "",
                 "  # Reply",
                 "  gmail 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
+                "  gmail 1 r -e \"19caef2cd6494116\"",
                 "  gmail 1 r -a \"19caef2cd6494116\" \"Thanks all.\"",
                 "  gmail 1 r \"19caef2cd6494116\" \"Adding context.\" -cc \"manager@example.com\"",
                 "  gmail 1 r \"19caef2cd6494116\" \"Please review.\" -atch \"/tmp/project_dir\"",
@@ -165,28 +166,42 @@ def _parse_recipient_csv_optional(value: str) -> list[str]:
     return [item.strip() for item in stripped.split(",") if item.strip()]
 
 
-def _compose_editor_template(from_email: str, signature: str) -> str:
+def _strip_outer_quotes(value: str) -> str:
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {'"', "'"}:
+        return stripped[1:-1].strip()
+    return stripped
+
+
+def _parse_attachment_csv_optional(value: str) -> list[Path]:
+    stripped = _strip_outer_quotes(value)
+    if not stripped:
+        return []
+    raw_items = [item.strip() for item in stripped.split(",") if item.strip()]
+    if not raw_items:
+        return []
+    return [_parse_attachment_path(item) for item in raw_items]
+
+
+def _compose_editor_template(from_email: str, signature: str, include_to_subject: bool) -> str:
+    header_lines = [f"From: {from_email}"]
+    if include_to_subject:
+        header_lines.extend(["To:", "Subject:"])
+    header_lines.extend(["CC:", "BCC:", 'Attachments: ""', "Body:", ""])
     return "\n".join(
-        [
-            f"From: {from_email}",
-            "To:",
-            "Subject:",
-            "CC:",
-            "BCC:",
-            "Body:",
-            "",
-            f"-- \n{signature.strip()}",
-            "",
-        ]
+        header_lines + [f"-- \n{signature.strip()}", ""]
     )
 
 
-def _parse_editor_template(content: str) -> tuple[str, str, str, list[str], list[str]]:
+def _parse_editor_template(
+    content: str,
+) -> tuple[str, str, str, list[str], list[str], list[Path]]:
     lines = content.splitlines()
     to_email = ""
     subject = ""
     cc_emails: list[str] = []
     bcc_emails: list[str] = []
+    attachment_paths: list[Path] = []
     body_lines: list[str] = []
     in_body = False
 
@@ -212,16 +227,22 @@ def _parse_editor_template(content: str) -> tuple[str, str, str, list[str], list
             cc_emails = _parse_recipient_csv_optional(value)
         elif key_norm == "bcc":
             bcc_emails = _parse_recipient_csv_optional(value)
+        elif key_norm == "attachments":
+            attachment_paths = _parse_attachment_csv_optional(value)
 
     body = "\n".join(body_lines).strip()
-    return to_email, subject, body, cc_emails, bcc_emails
+    return to_email, subject, body, cc_emails, bcc_emails, attachment_paths
 
 
-def _open_editor_template(from_email: str, signature: str) -> tuple[str, str, str, list[str], list[str]]:
+def _open_editor_template(
+    from_email: str,
+    signature: str,
+    include_to_subject: bool,
+) -> tuple[str, str, str, list[str], list[str], list[Path]]:
     editor_cmd = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vim"
     with tempfile.NamedTemporaryFile(mode="w+", suffix=".txt", delete=False) as tmp:
         tmp_path = Path(tmp.name)
-        tmp.write(_compose_editor_template(from_email, signature))
+        tmp.write(_compose_editor_template(from_email, signature, include_to_subject))
         tmp.flush()
     try:
         editor_parts = shlex.split(editor_cmd)
@@ -307,10 +328,9 @@ def _parse_send_args(
 
 
 def _handle_send(service, from_email: str, params: list[str], signature: str) -> int:
-    attachment_paths: list[Path] = []
-    if params == ["-v"]:
-        to_email, subject, body, cc_emails, bcc_emails = _open_editor_template(
-            from_email, signature
+    if params == ["-e"]:
+        to_email, subject, body, cc_emails, bcc_emails, attachment_paths = _open_editor_template(
+            from_email, signature, include_to_subject=True
         )
         if not to_email or not subject or not body:
             return 0
@@ -522,11 +542,11 @@ def _run_audit_mode(
 
 def _parse_reply_args(
     params: list[str],
-) -> tuple[bool, bool, str, str, list[str], list[str], list[Path]]:
+) -> tuple[bool, bool, bool, str, str, list[str], list[str], list[Path]]:
     if not params:
         raise UsageError(
-            "Reply requires: [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]] "
-            "or [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
+            "Reply requires: [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]] "
+            "or [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
         )
 
     flags: set[str] = set()
@@ -539,22 +559,29 @@ def _parse_reply_args(
         if not token.startswith("-") or token == "-":
             break
         for flag in token[1:]:
-            if flag not in {"a", "t"}:
+            if flag not in {"a", "t", "e"}:
                 raise UsageError(
-                    f"Unknown reply option '-{flag}'. Supported: -a, -t, -at, -ta, -cc, -bcc, -atch"
+                    f"Unknown reply option '-{flag}'. Supported: -a, -t, -e, -at, -ta, -ae, -te, -cc, -bcc, -atch"
                 )
             flags.add(flag)
         index += 1
 
     remaining = params[index:]
     target_name = "thread_id" if "t" in flags else "message_id"
-    if len(remaining) < 2:
+    use_editor = "e" in flags
+    minimum_required = 1 if use_editor else 2
+    if len(remaining) < minimum_required:
         raise UsageError(
-            f"Reply requires: <{target_name}> <body> before trailing options"
+            f"Reply requires: <{target_name}> {'<body> ' if not use_editor else ''}before trailing options"
         )
 
-    target_id, body = remaining[:2]
-    trailing = remaining[2:]
+    target_id = remaining[0]
+    body = ""
+    trailing_start = 1
+    if not use_editor:
+        body = remaining[1]
+        trailing_start = 2
+    trailing = remaining[trailing_start:]
     cc_emails: list[str] = []
     bcc_emails: list[str] = []
     attachment_paths: list[Path] = []
@@ -582,11 +609,30 @@ def _parse_reply_args(
             "Reply options must appear at the end. Supported trailing options: -cc, -bcc, -atch"
         )
 
-    return "t" in flags, "a" in flags, target_id, body, cc_emails, bcc_emails, attachment_paths
+    return "t" in flags, "a" in flags, use_editor, target_id, body, cc_emails, bcc_emails, attachment_paths
 
 
 def _handle_reply(service, from_email: str, params: list[str], signature: str) -> int:
-    use_thread, reply_all, target_id, body, cc_emails, bcc_emails, attachment_paths = _parse_reply_args(params)
+    (
+        use_thread,
+        reply_all,
+        use_editor,
+        target_id,
+        body,
+        cc_emails,
+        bcc_emails,
+        attachment_paths,
+    ) = _parse_reply_args(params)
+    if use_editor:
+        _, _, body_from_editor, cc_from_editor, bcc_from_editor, attachment_from_editor = _open_editor_template(
+            from_email, signature, include_to_subject=False
+        )
+        if not body_from_editor:
+            return 0
+        body = body_from_editor
+        cc_emails = cc_from_editor + cc_emails
+        bcc_emails = bcc_from_editor + bcc_emails
+        attachment_paths = attachment_from_editor + attachment_paths
     signed_body = _append_signature(body, signature)
     if use_thread:
         response = reply_to_thread(

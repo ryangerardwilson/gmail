@@ -79,22 +79,22 @@ gmail <preset> sa <spam_email1,spam_email2,...>
 gmail <preset> sa -ur
 gmail <preset> mr <message_id>
 gmail <preset> d <message_id>
-gmail <preset> s -v
+gmail <preset> s -e
 gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 gmail <preset> ls <query>
 gmail <preset> ls -ur [limit]
 gmail <preset> ls -ura [limit]
 gmail <preset> ls -ra [limit]
 gmail <preset> ls -t <thread_id>
-gmail <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
-gmail <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
+gmail <preset> r [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
+gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 ```
 
 Examples:
 
 ```bash
 # Send email
-gmail 1 s -v
+gmail 1 s -e
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body"
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -cc "cc1@example.com,cc2@example.com" -bcc "audit@example.com"
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt"
@@ -117,6 +117,7 @@ gmail 1 d "18f3abc..."
 
 # Reply
 gmail 1 r "18f3abc..." "Thanks, sharing this now."
+gmail 1 r -e "18f3abc..."
 gmail 1 r -a "18f3abc..." "Thanks everyone."
 gmail 1 r "18f3abc..." "Adding context." -cc "manager@example.com" -bcc "audit@example.com"
 gmail 1 r "18f3abc..." "Sharing the latest." -atch "/tmp/project_dir"
@@ -138,7 +139,9 @@ Reply flags:
 - `-cc`: add comma-separated recipients to Cc for send/reply (trailing option, after required args).
 - `-bcc`: add comma-separated recipients to Bcc for send/reply (trailing option, after required args).
 - `-atch`: attach one or more file/dir paths; directories are attached as generated `.zip` files (trailing option, after required args).
-- `s -v`: open your editor (`$VISUAL`, then `$EDITOR`, else `vim`) with a template (`From/To/Subject/CC/BCC/Body`) and send using filled fields.
+- `s -e`: open your editor (`$VISUAL`, then `$EDITOR`, else `vim`) with a compose template and send from filled fields.
+- `r -e`: open your editor for reply body/CC/BCC/Attachments (target id stays on CLI). Works with `-a`, `-t`, `-at`, `-ta`.
+- Editor template supports `Attachments: "path1,path2,path3"` (comma-separated file/dir paths).
 
 Spam flow commands:
 - `si` (spam identify): scans unread non-`@gmail.com` messages and counts sender occurrences, then lists senders with more than 5 unread mails and (on confirm) adds them to `spam_senders`.

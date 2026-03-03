@@ -2,18 +2,26 @@ from __future__ import annotations
 
 import argparse
 from email.utils import parseaddr
+import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 
 from gmail_cli.auth import build_gmail_service
-from gmail_cli.config import get_account, load_config, normalize_sender_list, update_account_sender_lists
+from gmail_cli.config import (
+    get_account,
+    load_config,
+    normalize_spam_sender_list,
+    update_account_sender_lists,
+)
 from gmail_cli.errors import ConfigError, GmailCliError, UsageError
 from gmail_cli.formatters import render_messages_table
 from gmail_cli.formatters import summarize_message
 from gmail_cli.gmail_api import (
+    batch_delete_messages,
     delete_message,
     get_thread_messages,
     list_messages,
@@ -43,8 +51,10 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> si\n"
             "gmail <preset> sc\n"
             "gmail <preset> sa <spam_email1,spam_email2,...>\n"
+            "gmail <preset> sa -ur\n"
             "gmail <preset> mr <message_id>\n"
             "gmail <preset> d <message_id>\n"
+            "gmail <preset> s -v\n"
             "gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "gmail <preset> ls <query>\n"
             "gmail <preset> ls -ur [limit]\n"
@@ -86,8 +96,10 @@ def _print_usage_guide() -> None:
                 "  gmail <preset> si",
                 "  gmail <preset> sc",
                 "  gmail <preset> sa <spam_email1,spam_email2,...>",
+                "  gmail <preset> sa -ur",
                 "  gmail <preset> mr <message_id>",
                 "  gmail <preset> d <message_id>",
+                "  gmail <preset> s -v",
                 "  gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "  gmail <preset> ls <query>",
                 "  gmail <preset> ls -ur [limit]",
@@ -99,6 +111,7 @@ def _print_usage_guide() -> None:
                 "",
                 "Examples:",
                 "  # Send email",
+                "  gmail 1 s -v",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\"",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -cc \"cc1@example.com,cc2@example.com\" -bcc \"audit@example.com\"",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\"",
@@ -132,6 +145,7 @@ def _print_usage_guide() -> None:
                 "  gmail 1 si",
                 "  gmail 1 sc",
                 "  gmail 1 sa \"spam1@example.com,spam2@example.com\"",
+                "  gmail 1 sa -ur",
             ]
         )
     )
@@ -142,6 +156,93 @@ def _parse_recipient_csv(value: str, flag: str) -> list[str]:
     if not parsed:
         raise UsageError(f"{flag} requires at least one email address")
     return parsed
+
+
+def _parse_recipient_csv_optional(value: str) -> list[str]:
+    stripped = value.strip()
+    if not stripped:
+        return []
+    return [item.strip() for item in stripped.split(",") if item.strip()]
+
+
+def _compose_editor_template(from_email: str, signature: str) -> str:
+    return "\n".join(
+        [
+            f"From: {from_email}",
+            "To:",
+            "Subject:",
+            "CC:",
+            "BCC:",
+            "Body:",
+            "",
+            f"-- \n{signature.strip()}",
+            "",
+        ]
+    )
+
+
+def _parse_editor_template(content: str) -> tuple[str, str, str, list[str], list[str]]:
+    lines = content.splitlines()
+    to_email = ""
+    subject = ""
+    cc_emails: list[str] = []
+    bcc_emails: list[str] = []
+    body_lines: list[str] = []
+    in_body = False
+
+    for line in lines:
+        if in_body:
+            body_lines.append(line)
+            continue
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key_norm = key.strip().lower()
+        value = value.strip()
+        if key_norm == "body":
+            in_body = True
+            if value:
+                body_lines.append(value)
+            continue
+        if key_norm == "to":
+            to_email = value
+        elif key_norm == "subject":
+            subject = value
+        elif key_norm == "cc":
+            cc_emails = _parse_recipient_csv_optional(value)
+        elif key_norm == "bcc":
+            bcc_emails = _parse_recipient_csv_optional(value)
+
+    body = "\n".join(body_lines).strip()
+    return to_email, subject, body, cc_emails, bcc_emails
+
+
+def _open_editor_template(from_email: str, signature: str) -> tuple[str, str, str, list[str], list[str]]:
+    editor_cmd = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vim"
+    with tempfile.NamedTemporaryFile(mode="w+", suffix=".txt", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        tmp.write(_compose_editor_template(from_email, signature))
+        tmp.flush()
+    try:
+        editor_parts = shlex.split(editor_cmd)
+        if not editor_parts:
+            raise UsageError("Editor command is empty. Set VISUAL or EDITOR.")
+        proc = subprocess.run([*editor_parts, str(tmp_path)], check=False)
+        if proc.returncode != 0:
+            raise UsageError(
+                f"Editor exited with code {proc.returncode}. Message not sent."
+            )
+        content = tmp_path.read_text(encoding="utf-8")
+        return _parse_editor_template(content)
+    except FileNotFoundError as exc:
+        raise UsageError(
+            f"Editor not found: {editor_cmd}. Set VISUAL or EDITOR to a valid editor."
+        ) from exc
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _parse_attachment_path(value: str) -> Path:
@@ -206,7 +307,15 @@ def _parse_send_args(
 
 
 def _handle_send(service, from_email: str, params: list[str], signature: str) -> int:
-    to_email, subject, body, cc_emails, bcc_emails, attachment_paths = _parse_send_args(params)
+    attachment_paths: list[Path] = []
+    if params == ["-v"]:
+        to_email, subject, body, cc_emails, bcc_emails = _open_editor_template(
+            from_email, signature
+        )
+        if not to_email or not subject or not body:
+            return 0
+    else:
+        to_email, subject, body, cc_emails, bcc_emails, attachment_paths = _parse_send_args(params)
     signed_body = _append_signature(body, signature)
     response = send_email(
         service,
@@ -507,7 +616,7 @@ def _handle_reply(service, from_email: str, params: list[str], signature: str) -
 
 def _merge_unique(existing: list[str], incoming: list[str]) -> list[str]:
     merged = existing + incoming
-    return normalize_sender_list(merged)
+    return normalize_spam_sender_list(merged)
 
 
 def _handle_spam_identify(config, account, service) -> int:
@@ -549,16 +658,75 @@ def _handle_spam_identify(config, account, service) -> int:
 
 
 def _handle_spam_clean(account, service) -> int:
-    result = run_cleanup_for_account(service, account)
+    def _progress(event: str, value: int, total: int | None = None, group_ids: int | None = None, unique_ids: int | None = None) -> None:
+        if event == "groups_total":
+            print(f"spam sender groups to process: {value}")
+        elif event == "group_processed" and total is not None:
+            ids_found = group_ids if group_ids is not None else 0
+            unique_found = unique_ids if unique_ids is not None else 0
+            print(
+                f"processed group {value}/{total}: ids_found={ids_found} unique_ids_collected={unique_found}"
+            )
+        elif event == "trashed_total":
+            print(f"trashed so far: {value}")
+
+    result = run_cleanup_for_account(service, account, progress_callback=_progress)
     print(f"trashed_spam={result.trashed_spam}")
     print(f"sc complete: trashed_spam={result.trashed_spam}")
     return 0
 
 
-def _handle_spam_add(config, account, params: list[str]) -> int:
+def _handle_spam_add(config, account, service, params: list[str]) -> int:
     if len(params) != 1:
-        raise UsageError("sa requires exactly 1 param: <spam_email1,spam_email2,...>")
-    new_items = normalize_sender_list([item.strip() for item in params[0].split(",")])
+        raise UsageError("sa requires exactly 1 param: <spam_email1,spam_email2,...> or -ur")
+
+    if params[0] == "-ur":
+        print("sa -ur: scanning unread messages in batches...")
+        page_token: str | None = None
+        sender_set: set[str] = set()
+        message_ids: list[str] = []
+        batch_index = 0
+        while True:
+            messages, next_page = list_messages_page(
+                service,
+                "is:unread",
+                max_results=100,
+                page_token=page_token,
+            )
+            if not messages:
+                break
+            batch_index += 1
+            for message in messages:
+                row = summarize_message(message)
+                sender = parseaddr(row.get("from", ""))[1].strip().lower() or row.get("from_email", "").strip().lower()
+                if sender:
+                    sender_set.add(sender)
+                message_id = str(message.get("id", "")).strip()
+                if message_id:
+                    message_ids.append(message_id)
+            print(
+                f"processed unread batch {batch_index}: senders_collected={len(sender_set)} "
+                f"messages_collected={len(message_ids)}"
+            )
+            if not next_page:
+                break
+            page_token = next_page
+
+        if not message_ids:
+            print("sa -ur complete: no unread messages found")
+            return 0
+
+        candidate_senders = normalize_spam_sender_list(sorted(sender_set))
+        merged = _merge_unique(account.spam_senders, candidate_senders)
+        update_account_sender_lists(config.path, {account.preset: merged})
+        trashed = batch_delete_messages(service, message_ids)
+        print(
+            f"sa -ur complete: added_senders={len(candidate_senders)} "
+            f"total_spam_senders={len(merged)} trashed_unread={trashed}"
+        )
+        return 0
+
+    new_items = normalize_spam_sender_list([item.strip() for item in params[0].split(",")])
     if not new_items:
         raise UsageError("sa requires at least one valid email in comma-separated input")
     merged = _merge_unique(account.spam_senders, new_items)
@@ -690,7 +858,7 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_spam_clean(account, service)
 
     if command == "sa":
-        return _handle_spam_add(config, account, args.params)
+        return _handle_spam_add(config, account, service, args.params)
 
     raise UsageError(f"Unknown command '{args.command}'. Use s, ls, r, mr, d, si, sc, or sa.")
 

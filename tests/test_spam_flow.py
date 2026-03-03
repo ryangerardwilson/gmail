@@ -22,7 +22,7 @@ class SpamFlowTests(unittest.TestCase):
             existing_spam=["b@spam.com"],
             threshold=5,
         )
-        self.assertEqual([item.sender for item in selected], ["c@gmail.com", "a@spam.com"])
+        self.assertEqual([item.sender for item in selected], ["a@spam.com"])
 
     def test_make_identify_decision(self) -> None:
         candidates = select_spam_candidates(

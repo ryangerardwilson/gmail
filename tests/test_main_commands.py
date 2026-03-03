@@ -3,11 +3,82 @@ from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from gmail_cli.errors import UsageError
-from main import _handle_delete, _handle_list, _handle_mark_read, main
+from main import (
+    _handle_delete,
+    _handle_list,
+    _handle_mark_read,
+    _parse_editor_template,
+    _handle_send,
+    main,
+)
 from gmail_cli.config import AccountConfig
 
 
 class MainCommandTests(unittest.TestCase):
+    def test_parse_editor_template(self) -> None:
+        content = "\n".join(
+            [
+                "From: me@example.com",
+                "To: user@example.com",
+                "Subject: Hello",
+                "CC: cc1@example.com, cc2@example.com",
+                "BCC: audit@example.com",
+                "Body:",
+                "",
+                "Line1",
+                "Line2",
+            ]
+        )
+        parsed = _parse_editor_template(content)
+        self.assertEqual(parsed[0], "user@example.com")
+        self.assertEqual(parsed[1], "Hello")
+        self.assertEqual(parsed[2], "Line1\nLine2")
+        self.assertEqual(parsed[3], ["cc1@example.com", "cc2@example.com"])
+        self.assertEqual(parsed[4], ["audit@example.com"])
+
+    def test_parse_editor_template_missing_fields_is_allowed(self) -> None:
+        to_email, subject, body, cc_emails, bcc_emails = _parse_editor_template(
+            "Subject: x\nBody:\nhello"
+        )
+        self.assertEqual(to_email, "")
+        self.assertEqual(subject, "x")
+        self.assertEqual(body, "hello")
+        self.assertEqual(cc_emails, [])
+        self.assertEqual(bcc_emails, [])
+
+    def test_handle_send_editor_mode(self) -> None:
+        service = MagicMock()
+        with patch(
+            "main._open_editor_template",
+            return_value=(
+                "to@example.com",
+                "Subject",
+                "Body",
+                ["cc@example.com"],
+                ["bcc@example.com"],
+            ),
+        ) as editor_mock, patch("main.send_email", return_value={"id": "m1", "threadId": "t1"}) as send_mock:
+            code = _handle_send(service, "me@example.com", ["-v"], "sig")
+
+        self.assertEqual(code, 0)
+        editor_mock.assert_called_once_with("me@example.com", "sig")
+        send_mock.assert_called_once()
+        args, kwargs = send_mock.call_args
+        self.assertEqual(args[2], "to@example.com")
+        self.assertEqual(kwargs["cc_emails"], ["cc@example.com"])
+        self.assertEqual(kwargs["bcc_emails"], ["bcc@example.com"])
+        self.assertEqual(kwargs["attachment_paths"], [])
+
+    def test_handle_send_editor_mode_missing_required_fields_cancels(self) -> None:
+        service = MagicMock()
+        with patch(
+            "main._open_editor_template",
+            return_value=("", "Subject", "Body", [], []),
+        ), patch("main.send_email") as send_mock:
+            code = _handle_send(service, "me@example.com", ["-v"], "sig")
+        self.assertEqual(code, 0)
+        send_mock.assert_not_called()
+
     def test_handle_list_unread_default_limit(self) -> None:
         service = MagicMock()
         with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
@@ -67,6 +138,66 @@ class MainCommandTests(unittest.TestCase):
             code = main(["1", "sa", "new@spam.com,old@spam.com"])
         self.assertEqual(code, 0)
         update_mock.assert_called_once()
+
+    def test_sa_unread_mode_collects_and_trashes(self) -> None:
+        with patch("main.load_config") as load_config_mock, patch(
+            "main.get_account"
+        ) as get_account_mock, patch("main.build_gmail_service") as build_service_mock, patch(
+            "main._read_signature", return_value="sig"
+        ), patch("main.list_messages_page") as list_page_mock, patch(
+            "main.batch_delete_messages", return_value=2
+        ) as trash_mock, patch("main.update_account_sender_lists") as update_mock:
+            config = MagicMock()
+            config.path = Path("/tmp/config.json")
+            load_config_mock.return_value = config
+            get_account_mock.return_value = AccountConfig(
+                preset="1",
+                email="me@example.com",
+                client_secret_file=MagicMock(),
+                signature_file=MagicMock(),
+                spam_senders=[],
+            )
+            service = MagicMock()
+            build_service_mock.return_value = service
+            list_page_mock.side_effect = (
+                [
+                    (
+                        [
+                            {
+                                "id": "m1",
+                                "threadId": "t1",
+                                "snippet": "hello",
+                                "payload": {
+                                    "headers": [
+                                        {"name": "From", "value": "A <a@x.com>"},
+                                        {"name": "Subject", "value": "S"},
+                                        {"name": "Date", "value": "Mon, 1 Jan 2024 10:00:00 +0000"},
+                                    ]
+                                },
+                            },
+                            {
+                                "id": "m2",
+                                "threadId": "t2",
+                                "snippet": "hello",
+                                "payload": {
+                                    "headers": [
+                                        {"name": "From", "value": "B <b@gmail.com>"},
+                                        {"name": "Subject", "value": "S"},
+                                        {"name": "Date", "value": "Mon, 1 Jan 2024 10:00:00 +0000"},
+                                    ]
+                                },
+                            },
+                        ],
+                        None,
+                    )
+                ]
+            )
+            code = main(["1", "sa", "-ur"])
+
+        self.assertEqual(code, 0)
+        update_payload = update_mock.call_args.args[1]
+        self.assertEqual(sorted(update_payload["1"]), ["a@x.com"])
+        trash_mock.assert_called_once_with(service, ["m1", "m2"])
 
     def test_handle_list_unread_audit_bad_limit(self) -> None:
         service = MagicMock()

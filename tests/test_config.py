@@ -108,7 +108,7 @@ class ConfigTests(unittest.TestCase):
             update_account_sender_lists(
                 config_path,
                 {
-                    "1": ["Spam@X.com", "spam@x.com"],
+                    "1": ["Spam@X.com", "spam@x.com", "person@gmail.com"],
                 },
             )
             config = load_config(config_path)

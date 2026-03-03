@@ -35,7 +35,7 @@ def select_spam_candidates(
     selected = [
         SenderCount(sender=sender, unread_count=count)
         for sender, count in counts.items()
-        if count > threshold and sender.lower() not in spam_set
+        if count > threshold and sender.lower() not in spam_set and not sender.lower().endswith("@gmail.com")
     ]
     return sorted(selected, key=lambda item: (-item.unread_count, item.sender))
 
@@ -53,9 +53,36 @@ def make_identify_decision(candidates: list[SenderCount]) -> IdentifyDecision:
     return IdentifyDecision(add_to_spam=sorted(item.sender for item in candidates))
 
 
-def run_cleanup_for_account(service, account: AccountConfig) -> SpamCleanupResult:
-    trashed = 0
-    for sender in account.spam_senders:
-        query = f'is:unread from:{sender}'
-        trashed += batch_delete_messages(service, list_message_ids(service, query))
+def run_cleanup_for_account(service, account: AccountConfig, progress_callback=None) -> SpamCleanupResult:
+    sender_groups = _chunk_senders(account.spam_senders, 25)
+    if not sender_groups:
+        return SpamCleanupResult(trashed_spam=0)
+
+    all_ids: set[str] = set()
+    total_groups = len(sender_groups)
+    if progress_callback is not None:
+        progress_callback("groups_total", total_groups)
+    for index, group in enumerate(sender_groups, start=1):
+        query = _spam_group_query(group)
+        ids = list_message_ids(service, query)
+        all_ids.update(ids)
+        if progress_callback is not None:
+            progress_callback("group_processed", index, total_groups, len(ids), len(all_ids))
+
+    trashed = batch_delete_messages(service, sorted(all_ids))
+    if progress_callback is not None:
+        progress_callback("trashed_total", trashed)
     return SpamCleanupResult(trashed_spam=trashed)
+
+
+def _chunk_senders(senders: list[str], size: int) -> list[list[str]]:
+    if size <= 0:
+        return [senders]
+    return [senders[i : i + size] for i in range(0, len(senders), size)]
+
+
+def _spam_group_query(senders: list[str]) -> str:
+    if len(senders) == 1:
+        return f"from:{senders[0]}"
+    sender_terms = " OR ".join(f"from:{sender}" for sender in senders)
+    return f"({sender_terms})"

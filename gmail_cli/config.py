@@ -43,6 +43,11 @@ def normalize_sender_list(values: Any) -> list[str]:
     return out
 
 
+def normalize_spam_sender_list(values: Any) -> list[str]:
+    out = normalize_sender_list(values)
+    return [item for item in out if not item.endswith("@gmail.com")]
+
+
 def resolve_config_path() -> Path:
     override = os.getenv("GMAIL_CLI_CONFIG")
     if override:
@@ -80,7 +85,7 @@ def _validate_account(preset: str, raw: Any, config_path: Path) -> AccountConfig
     email = raw.get("email")
     client_secret = raw.get("client_secret_file")
     signature_file = raw.get("signature_file")
-    spam_senders = normalize_sender_list(raw.get("spam_senders"))
+    spam_senders = normalize_spam_sender_list(raw.get("spam_senders"))
 
     if not isinstance(email, str) or not email.strip():
         raise ConfigError(
@@ -191,7 +196,7 @@ def update_account_sender_lists(
         account = accounts.get(preset)
         if not isinstance(account, dict):
             continue
-        spam_values = normalize_sender_list(spam_list)
+        spam_values = normalize_spam_sender_list(spam_list)
         account["spam_senders"] = spam_values
 
     config_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")

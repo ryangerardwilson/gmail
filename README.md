@@ -76,8 +76,10 @@ gmail -u
 gmail <preset> si
 gmail <preset> sc
 gmail <preset> sa <spam_email1,spam_email2,...>
+gmail <preset> sa -ur
 gmail <preset> mr <message_id>
 gmail <preset> d <message_id>
+gmail <preset> s -v
 gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 gmail <preset> ls <query>
 gmail <preset> ls -ur [limit]
@@ -92,6 +94,7 @@ Examples:
 
 ```bash
 # Send email
+gmail 1 s -v
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body"
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -cc "cc1@example.com,cc2@example.com" -bcc "audit@example.com"
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt"
@@ -125,6 +128,7 @@ gmail 1 r -ta "19ca756c06a7ebcd" "Thanks all."
 gmail 1 si
 gmail 1 sc
 gmail 1 sa "spam1@example.com,spam2@example.com"
+gmail 1 sa -ur
 ```
 
 Reply flags:
@@ -134,11 +138,14 @@ Reply flags:
 - `-cc`: add comma-separated recipients to Cc for send/reply (trailing option, after required args).
 - `-bcc`: add comma-separated recipients to Bcc for send/reply (trailing option, after required args).
 - `-atch`: attach one or more file/dir paths; directories are attached as generated `.zip` files (trailing option, after required args).
+- `s -v`: open your editor (`$VISUAL`, then `$EDITOR`, else `vim`) with a template (`From/To/Subject/CC/BCC/Body`) and send using filled fields.
 
 Spam flow commands:
 - `si` (spam identify): scans unread non-`@gmail.com` messages and counts sender occurrences, then lists senders with more than 5 unread mails and (on confirm) adds them to `spam_senders`.
-- `sc` (spam clean): trashes unread messages from `spam_senders`.
+- `sc` (spam clean): trashes all messages (read + unread) from `spam_senders`.
 - `sa "<spam_email1,spam_email2,...>"`: manually add one or more senders to `spam_senders`.
+- `sa -ur`: adds senders of all unread messages to `spam_senders` and trashes those unread messages.
+- Safety rule: `@gmail.com` sender addresses are never added to `spam_senders`.
 
 Message utilities:
 - `mr <message_id>`: mark a single message as read.

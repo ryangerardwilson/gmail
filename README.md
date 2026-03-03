@@ -52,45 +52,55 @@ Notes:
 ## Usage
 
 ```bash
-python main.py -v
-python main.py -u
-python main.py <preset> si
-python main.py <preset> sc
-python main.py <preset> -mr <message_id>
-python main.py <preset> -d <message_id>
-python main.py <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
-python main.py <preset> ls <query>
-python main.py <preset> ls -ur [limit]
-python main.py <preset> ls -ura [limit]
-python main.py <preset> ls -t <thread_id>
-python main.py <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
-python main.py <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
+gmail -v
+gmail -u
+gmail <preset> si
+gmail <preset> sc
+gmail <preset> -mr <message_id>
+gmail <preset> -d <message_id>
+gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
+gmail <preset> ls <query>
+gmail <preset> ls -ur [limit]
+gmail <preset> ls -ura [limit]
+gmail <preset> ls -t <thread_id>
+gmail <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
+gmail <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 ```
 
 Examples:
 
 ```bash
-python main.py 1 s "xyz@example.com" "this is the subject" "this is the body"
-python main.py 1 s "xyz@example.com" "this is the subject" "this is the body" -cc "cc1@example.com,cc2@example.com" -bcc "audit@example.com"
-python main.py 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt"
-python main.py 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt" "/tmp/project_dir"
-python main.py 1 ls "from maanas limit 1"
-python main.py 1 ls -ur
-python main.py 1 ls -ur 1
-python main.py 1 ls -ura 10
-python main.py 1 ls "to silvia limit 1"
-python main.py 1 ls -t "19ca756c06a7ebcd"
-python main.py 1 -mr "18f3abc..."
-python main.py 1 -d "18f3abc..."
-python main.py 1 r "18f3abc..." "Thanks, sharing this now."
-python main.py 1 r -a "18f3abc..." "Thanks everyone."
-python main.py 1 r "18f3abc..." "Adding context." -cc "manager@example.com" -bcc "audit@example.com"
-python main.py 1 r "18f3abc..." "Sharing the latest." -atch "/tmp/project_dir"
-python main.py 1 r -a "18f3abc..." "Please review." -atch "/tmp/notes.txt" "/tmp/project_dir"
-python main.py 1 r -t "19ca756c06a7ebcd" "Following up on this thread."
-python main.py 1 r -ta "19ca756c06a7ebcd" "Thanks all."
-python main.py 1 si
-python main.py 1 sc
+# Send email
+gmail 1 s "xyz@example.com" "this is the subject" "this is the body"
+gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -cc "cc1@example.com,cc2@example.com" -bcc "audit@example.com"
+gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt"
+gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt" "/tmp/project_dir"
+
+# List and audit messages
+gmail 1 ls "from maanas limit 1"
+gmail 1 ls -ur
+gmail 1 ls -ur 1
+# Audit unread emails
+gmail 1 ls -ura 10
+gmail 1 ls "to silvia limit 1"
+gmail 1 ls -t "19ca756c06a7ebcd"
+
+# Single-message utilities
+gmail 1 -mr "18f3abc..."
+gmail 1 -d "18f3abc..."
+
+# Reply
+gmail 1 r "18f3abc..." "Thanks, sharing this now."
+gmail 1 r -a "18f3abc..." "Thanks everyone."
+gmail 1 r "18f3abc..." "Adding context." -cc "manager@example.com" -bcc "audit@example.com"
+gmail 1 r "18f3abc..." "Sharing the latest." -atch "/tmp/project_dir"
+gmail 1 r -a "18f3abc..." "Please review." -atch "/tmp/notes.txt" "/tmp/project_dir"
+gmail 1 r -t "19ca756c06a7ebcd" "Following up on this thread."
+gmail 1 r -ta "19ca756c06a7ebcd" "Thanks all."
+
+# Spam flow
+gmail 1 si
+gmail 1 sc
 ```
 
 Reply flags:

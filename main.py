@@ -38,19 +38,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Declarative Gmail CLI",
         usage=(
-            "python main.py -v\n"
-            "python main.py -u\n"
-            "python main.py <preset> si\n"
-            "python main.py <preset> sc\n"
-            "python main.py <preset> -mr <message_id>\n"
-            "python main.py <preset> -d <message_id>\n"
-            "python main.py <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
-            "python main.py <preset> ls <query>\n"
-            "python main.py <preset> ls -ur [limit]\n"
-            "python main.py <preset> ls -ura [limit]\n"
-            "python main.py <preset> ls -t <thread_id>\n"
-            "python main.py <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
-            "python main.py <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
+            "gmail -v\n"
+            "gmail -u\n"
+            "gmail <preset> si\n"
+            "gmail <preset> sc\n"
+            "gmail <preset> -mr <message_id>\n"
+            "gmail <preset> -d <message_id>\n"
+            "gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
+            "gmail <preset> ls <query>\n"
+            "gmail <preset> ls -ur [limit]\n"
+            "gmail <preset> ls -ura [limit]\n"
+            "gmail <preset> ls -t <thread_id>\n"
+            "gmail <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
+            "gmail <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
         ),
     )
     parser.add_argument(
@@ -79,42 +79,52 @@ def _print_usage_guide() -> None:
             [
                 "Gmail CLI Usage",
                 "",
-                "  python main.py -v",
-                "  python main.py -u",
-                "  python main.py <preset> si",
-                "  python main.py <preset> sc",
-                "  python main.py <preset> -mr <message_id>",
-                "  python main.py <preset> -d <message_id>",
-                "  python main.py <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
-                "  python main.py <preset> ls <query>",
-                "  python main.py <preset> ls -ur [limit]",
-                "  python main.py <preset> ls -ura [limit]",
-                "  python main.py <preset> ls -t <thread_id>",
-                "  python main.py <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
-                "  python main.py <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
+                "  gmail -v",
+                "  gmail -u",
+                "  gmail <preset> si",
+                "  gmail <preset> sc",
+                "  gmail <preset> -mr <message_id>",
+                "  gmail <preset> -d <message_id>",
+                "  gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
+                "  gmail <preset> ls <query>",
+                "  gmail <preset> ls -ur [limit]",
+                "  gmail <preset> ls -ura [limit]",
+                "  gmail <preset> ls -t <thread_id>",
+                "  gmail <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
+                "  gmail <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "",
                 "Examples:",
-                "  python main.py 1 s \"xyz@example.com\" \"Hello\" \"Body\"",
-                "  python main.py 1 s \"xyz@example.com\" \"Hello\" \"Body\" -cc \"cc1@example.com,cc2@example.com\" -bcc \"audit@example.com\"",
-                "  python main.py 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\"",
-                "  python main.py 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
-                "  python main.py 1 ls \"contains jake limit 1\"",
-                "  python main.py 1 ls -ur",
-                "  python main.py 1 ls -ur 1",
-                "  python main.py 1 ls -ura 10",
-                "  python main.py 1 ls \"to silvia limit 1\"",
-                "  python main.py 1 ls -t \"19ca756c06a7ebcd\"",
-                "  python main.py 1 -mr \"19caef2cd6494116\"",
-                "  python main.py 1 -d \"19caef2cd6494116\"",
-                "  python main.py 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
-                "  python main.py 1 r -a \"19caef2cd6494116\" \"Thanks all.\"",
-                "  python main.py 1 r \"19caef2cd6494116\" \"Adding context.\" -cc \"manager@example.com\"",
-                "  python main.py 1 r \"19caef2cd6494116\" \"Please review.\" -atch \"/tmp/project_dir\"",
-                "  python main.py 1 r -a \"19caef2cd6494116\" \"Please review.\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
-                "  python main.py 1 r -t \"19ca756c06a7ebcd\" \"Following up on this thread.\"",
-                "  python main.py 1 r -ta \"19ca756c06a7ebcd\" \"Thanks everyone.\"",
-                "  python main.py 1 si",
-                "  python main.py 1 sc",
+                "  # Send email",
+                "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\"",
+                "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -cc \"cc1@example.com,cc2@example.com\" -bcc \"audit@example.com\"",
+                "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\"",
+                "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
+                "",
+                "  # List and audit messages",
+                "  gmail 1 ls \"contains jake limit 1\"",
+                "  gmail 1 ls -ur",
+                "  gmail 1 ls -ur 1",
+                "  # Audit unread emails",
+                "  gmail 1 ls -ura 10",
+                "  gmail 1 ls \"to silvia limit 1\"",
+                "  gmail 1 ls -t \"19ca756c06a7ebcd\"",
+                "",
+                "  # Single-message utilities",
+                "  gmail 1 -mr \"19caef2cd6494116\"",
+                "  gmail 1 -d \"19caef2cd6494116\"",
+                "",
+                "  # Reply",
+                "  gmail 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
+                "  gmail 1 r -a \"19caef2cd6494116\" \"Thanks all.\"",
+                "  gmail 1 r \"19caef2cd6494116\" \"Adding context.\" -cc \"manager@example.com\"",
+                "  gmail 1 r \"19caef2cd6494116\" \"Please review.\" -atch \"/tmp/project_dir\"",
+                "  gmail 1 r -a \"19caef2cd6494116\" \"Please review.\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
+                "  gmail 1 r -t \"19ca756c06a7ebcd\" \"Following up on this thread.\"",
+                "  gmail 1 r -ta \"19ca756c06a7ebcd\" \"Thanks everyone.\"",
+                "",
+                "  # Spam flow",
+                "  gmail 1 si",
+                "  gmail 1 sc",
             ]
         )
     )
@@ -565,7 +575,7 @@ def main(argv: list[str] | None = None) -> int:
     if first in preset_required_commands:
         hint = " ".join(argv)
         raise UsageError(
-            f"Missing preset before command '{argv[0]}'. Example: python main.py <preset> {hint}"
+            f"Missing preset before command '{argv[0]}'. Example: gmail <preset> {hint}"
         )
 
     parser = _build_parser()
@@ -573,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.upgrade:
         if args.preset or args.command or args.params:
-            raise UsageError("-u does not accept extra args. Use: python main.py -u")
+            raise UsageError("-u does not accept extra args. Use: gmail -u")
         return _upgrade_to_latest()
     if not args.preset or not args.command:
         raise UsageError("Expected: <preset> <command>. Use -h for usage.")
@@ -608,12 +618,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "si":
         if args.params:
-            raise UsageError("si does not accept extra args. Use: python main.py <preset> si")
+            raise UsageError("si does not accept extra args. Use: gmail <preset> si")
         return _handle_spam_identify(config, account, service)
 
     if command == "sc":
         if args.params:
-            raise UsageError("sc does not accept extra args. Use: python main.py <preset> sc")
+            raise UsageError("sc does not accept extra args. Use: gmail <preset> sc")
         return _handle_spam_clean(account, service)
 
     raise UsageError(f"Unknown command '{args.command}'. Use s, ls, r, -mr, -d, si, or sc.")

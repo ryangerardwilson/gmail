@@ -28,7 +28,9 @@ Example:
     "1": {
       "email": "first@yourdomain.com",
       "client_secret_file": "/home/you/.config/gmail/client_secret.json",
-      "signature_file": "/home/you/.config/gmail/signatures/account1.txt"
+      "signature_file": "/home/you/.config/gmail/signatures/account1.txt",
+      "spam_senders": ["annoying@promo.biz"],
+      "not_spam_senders": ["alerts@yourbank.com"]
     },
     "2": {
       "email": "second@yourdomain.com",
@@ -52,8 +54,14 @@ Notes:
 ```bash
 python main.py -v
 python main.py -u
+python main.py <preset> si
+python main.py <preset> sc
+python main.py <preset> -mr <message_id>
+python main.py <preset> -d <message_id>
 python main.py <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 python main.py <preset> ls <query>
+python main.py <preset> ls -ur [limit]
+python main.py <preset> ls -ura [limit]
 python main.py <preset> ls -t <thread_id>
 python main.py <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 python main.py <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
@@ -67,8 +75,13 @@ python main.py 1 s "xyz@example.com" "this is the subject" "this is the body" -c
 python main.py 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt"
 python main.py 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt" "/tmp/project_dir"
 python main.py 1 ls "from maanas limit 1"
+python main.py 1 ls -ur
+python main.py 1 ls -ur 1
+python main.py 1 ls -ura 10
 python main.py 1 ls "to silvia limit 1"
 python main.py 1 ls -t "19ca756c06a7ebcd"
+python main.py 1 -mr "18f3abc..."
+python main.py 1 -d "18f3abc..."
 python main.py 1 r "18f3abc..." "Thanks, sharing this now."
 python main.py 1 r -a "18f3abc..." "Thanks everyone."
 python main.py 1 r "18f3abc..." "Adding context." -cc "manager@example.com" -bcc "audit@example.com"
@@ -76,6 +89,8 @@ python main.py 1 r "18f3abc..." "Sharing the latest." -atch "/tmp/project_dir"
 python main.py 1 r -a "18f3abc..." "Please review." -atch "/tmp/notes.txt" "/tmp/project_dir"
 python main.py 1 r -t "19ca756c06a7ebcd" "Following up on this thread."
 python main.py 1 r -ta "19ca756c06a7ebcd" "Thanks all."
+python main.py 1 si
+python main.py 1 sc
 ```
 
 Reply flags:
@@ -85,6 +100,16 @@ Reply flags:
 - `-cc`: add comma-separated recipients to Cc for send/reply (trailing option, after required args).
 - `-bcc`: add comma-separated recipients to Bcc for send/reply (trailing option, after required args).
 - `-atch`: attach one or more file/dir paths; directories are attached as generated `.zip` files (trailing option, after required args).
+
+Spam flow commands:
+- `si` (spam identify): scans unread non-`@gmail.com` messages and counts sender occurrences, then lists senders with more than 5 unread mails. It prompts for exclusions and writes updates to `spam_senders` / `not_spam_senders` in config.
+- `sc` (spam clean): deletes unread messages from `spam_senders` and marks unread messages from `not_spam_senders` as read.
+
+Message utilities:
+- `-mr <message_id>`: mark a single message as read.
+- `-d <message_id>`: delete a single message.
+- `ls -ur [limit]`: list unread messages only; if `limit` is omitted, uses config default list limit.
+- `ls -ura [limit]`: interactive unread audit. For each unread message: `s` marks spam (adds sender to `spam_senders` and trashes message), `t` trashes message without spam-list update, `n` leaves message unread, `q` stops audit.
 
 ## First run auth
 

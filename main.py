@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from email.utils import parseaddr
 from pathlib import Path
 import shutil
 import subprocess
@@ -8,17 +9,26 @@ import sys
 import tempfile
 
 from gmail_cli.auth import build_gmail_service
-from gmail_cli.config import get_account, load_config
+from gmail_cli.config import get_account, load_config, normalize_sender_list, update_account_sender_lists
 from gmail_cli.errors import ConfigError, GmailCliError, UsageError
 from gmail_cli.formatters import render_messages_table
+from gmail_cli.formatters import summarize_message
 from gmail_cli.gmail_api import (
+    delete_message,
     get_thread_messages,
     list_messages,
+    mark_message_read,
     reply_to_message,
     reply_to_thread,
     send_email,
 )
 from gmail_cli.query_parser import parse_declarative_query
+from gmail_cli.spam_flow import (
+    make_identify_decision,
+    parse_exclusion_indexes,
+    run_cleanup_for_account,
+    run_identify_for_account,
+)
 
 __version__ = "0.1.0"
 _TRAILING_OPTIONS = {"-cc", "-bcc", "-atch"}
@@ -30,8 +40,14 @@ def _build_parser() -> argparse.ArgumentParser:
         usage=(
             "python main.py -v\n"
             "python main.py -u\n"
+            "python main.py <preset> si\n"
+            "python main.py <preset> sc\n"
+            "python main.py <preset> -mr <message_id>\n"
+            "python main.py <preset> -d <message_id>\n"
             "python main.py <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "python main.py <preset> ls <query>\n"
+            "python main.py <preset> ls -ur [limit]\n"
+            "python main.py <preset> ls -ura [limit]\n"
             "python main.py <preset> ls -t <thread_id>\n"
             "python main.py <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "python main.py <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
@@ -52,7 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "preset", nargs="?", help="Account preset key from config.json, e.g. 1"
     )
-    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r")
+    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | -mr | -d | si | sc")
     parser.add_argument("params", nargs=argparse.REMAINDER, help="Command parameters")
     return parser
 
@@ -65,8 +81,14 @@ def _print_usage_guide() -> None:
                 "",
                 "  python main.py -v",
                 "  python main.py -u",
+                "  python main.py <preset> si",
+                "  python main.py <preset> sc",
+                "  python main.py <preset> -mr <message_id>",
+                "  python main.py <preset> -d <message_id>",
                 "  python main.py <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "  python main.py <preset> ls <query>",
+                "  python main.py <preset> ls -ur [limit]",
+                "  python main.py <preset> ls -ura [limit]",
                 "  python main.py <preset> ls -t <thread_id>",
                 "  python main.py <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "  python main.py <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
@@ -77,8 +99,13 @@ def _print_usage_guide() -> None:
                 "  python main.py 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\"",
                 "  python main.py 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
                 "  python main.py 1 ls \"contains jake limit 1\"",
+                "  python main.py 1 ls -ur",
+                "  python main.py 1 ls -ur 1",
+                "  python main.py 1 ls -ura 10",
                 "  python main.py 1 ls \"to silvia limit 1\"",
                 "  python main.py 1 ls -t \"19ca756c06a7ebcd\"",
+                "  python main.py 1 -mr \"19caef2cd6494116\"",
+                "  python main.py 1 -d \"19caef2cd6494116\"",
                 "  python main.py 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
                 "  python main.py 1 r -a \"19caef2cd6494116\" \"Thanks all.\"",
                 "  python main.py 1 r \"19caef2cd6494116\" \"Adding context.\" -cc \"manager@example.com\"",
@@ -86,6 +113,8 @@ def _print_usage_guide() -> None:
                 "  python main.py 1 r -a \"19caef2cd6494116\" \"Please review.\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
                 "  python main.py 1 r -t \"19ca756c06a7ebcd\" \"Following up on this thread.\"",
                 "  python main.py 1 r -ta \"19ca756c06a7ebcd\" \"Thanks everyone.\"",
+                "  python main.py 1 si",
+                "  python main.py 1 sc",
             ]
         )
     )
@@ -176,9 +205,103 @@ def _handle_send(service, from_email: str, params: list[str], signature: str) ->
     return 0
 
 
-def _handle_list(service, params: list[str], default_limit: int, my_email: str) -> int:
+def _parse_optional_limit(flag: str, params: list[str], default_limit: int) -> int:
+    if len(params) > 2:
+        raise UsageError(f"{flag} accepts at most 1 optional param: [limit]")
+    max_results = default_limit
+    if len(params) == 2:
+        try:
+            max_results = int(params[1])
+        except ValueError as exc:
+            raise UsageError(f"{flag} limit must be a positive integer") from exc
+        if max_results <= 0:
+            raise UsageError(f"{flag} limit must be > 0")
+    return max_results
+
+
+def _handle_list(
+    service,
+    params: list[str],
+    default_limit: int,
+    my_email: str,
+    config_path=None,
+    account=None,
+) -> int:
     if not params:
         raise UsageError("ls requires a query string, e.g. \"from maanas limit 1\"")
+
+    if params[0] == "-ur":
+        max_results = _parse_optional_limit("ls -ur", params, default_limit)
+        messages = list_messages(service, "is:unread", max_results)
+        print(render_messages_table(messages, my_email))
+        return 0
+
+    if params[0] == "-ura":
+        if config_path is None or account is None:
+            raise UsageError("Internal error: ls -ura requires account context")
+        max_results = _parse_optional_limit("ls -ura", params, default_limit)
+        messages = list_messages(service, "is:unread", max_results)
+        if not messages:
+            print("No unread messages found.")
+            return 0
+
+        spam_senders = list(account.spam_senders)
+        spam_set = set(spam_senders)
+        trashed = 0
+        audited = 0
+
+        print(
+            "Unread audit mode: enter 's' for spam (add sender to spam_senders + trash message), "
+            "'t' for trash only, 'n' for not spam (leave unread), 'q' to stop."
+        )
+        for index, message in enumerate(messages, start=1):
+            audited += 1
+            row = summarize_message(message)
+            sender = parseaddr(row.get("from", ""))[1].strip().lower() or row.get("from_email", "").strip().lower()
+            message_id = str(message.get("id", ""))
+            print(f"\n[{index}/{len(messages)}] message_id={message_id}")
+            print(f"from    : {row.get('from', '')}")
+            print(f"subject : {row.get('subject', '')}")
+            print(f"date    : {row.get('date', '')}")
+            print(f"snippet : {str(message.get('snippet', ''))}")
+
+            while True:
+                choice = input("action [s=spam, t=trash only, n=not spam, q=quit]: ").strip().lower()
+                if choice not in {"s", "t", "n", "q"}:
+                    print("Invalid input. Use s, t, n, or q.")
+                    continue
+                break
+
+            if choice == "q":
+                audited -= 1
+                break
+            if choice == "n":
+                continue
+            delete_message(service, message_id)
+            trashed += 1
+            if choice == "t":
+                print(f"trashed message_id={message_id}")
+                continue
+
+            if not sender:
+                print("trashed message, but could not parse sender email for spam_senders update")
+                continue
+            if sender not in spam_set:
+                spam_set.add(sender)
+                spam_senders.append(sender)
+            print(f"trashed message_id={message_id} and added sender to spam_senders: {sender}")
+
+        update_account_sender_lists(
+            config_path,
+            {
+                account.preset: {
+                    "spam_senders": spam_senders,
+                    "not_spam_senders": account.not_spam_senders,
+                }
+            },
+        )
+        print(f"ls -ura complete: audited={audited} trashed={trashed}")
+        return 0
 
     if params[0] == "-t":
         if len(params) != 2:
@@ -289,6 +412,106 @@ def _handle_reply(service, from_email: str, params: list[str], signature: str) -
     return 0
 
 
+def _merge_unique(existing: list[str], incoming: list[str]) -> list[str]:
+    merged = existing + incoming
+    return normalize_sender_list(merged)
+
+
+def _handle_spam_identify(config, account, service) -> int:
+    print("scanning unread non-gmail sender sample...")
+
+    def _progress(event: str, value: int, total: int | None = None) -> None:
+        if event == "listed_unread_messages":
+            print(f"unread non-gmail messages listed: {value}")
+        elif event == "counted_sender_messages" and total is not None:
+            print(f"counting sender occurrences: {value}/{total}")
+        elif event == "unique_senders":
+            print(f"unique non-gmail senders found: {value}")
+
+    candidates = run_identify_for_account(service, account, progress_callback=_progress)
+    print(f"potential spammers identified: {len(candidates)}")
+    if not candidates:
+        print("no potential spam senders found")
+        return 0
+
+    print("potential spam senders (>5 unread, non-gmail):")
+    for index, item in enumerate(candidates, start=1):
+        print(f"  {index}. {item.sender} (unread={item.unread_count})")
+
+    exclusions_raw = input(
+        "enter item numbers to exclude into not_spam (comma-separated, blank for none): "
+    )
+    try:
+        excluded = parse_exclusion_indexes(exclusions_raw, len(candidates))
+    except ValueError as exc:
+        raise UsageError(str(exc)) from exc
+
+    decision = make_identify_decision(candidates, excluded)
+    if not decision.add_to_spam and not decision.add_to_not_spam:
+        print("no list updates requested")
+        return 0
+
+    print(
+        f"review: add_to_spam={len(decision.add_to_spam)} "
+        f"add_to_not_spam={len(decision.add_to_not_spam)}"
+    )
+    confirm = input("confirm update config? [y/N]: ").strip().lower()
+    if confirm != "y":
+        print("skipped by user")
+        return 0
+
+    merged_spam = _merge_unique(account.spam_senders, decision.add_to_spam)
+    merged_not_spam = _merge_unique(account.not_spam_senders, decision.add_to_not_spam)
+    update_account_sender_lists(
+        config.path,
+        {
+            preset: {
+                "spam_senders": merged_spam,
+                "not_spam_senders": merged_not_spam,
+            }
+        },
+    )
+    print(
+        f"updated: +{len(decision.add_to_spam)} spam, +{len(decision.add_to_not_spam)} not_spam"
+    )
+    print(
+        f"si complete: spam_added={len(decision.add_to_spam)} "
+        f"not_spam_added={len(decision.add_to_not_spam)}"
+    )
+    return 0
+
+
+def _handle_spam_clean(account, service) -> int:
+    result = run_cleanup_for_account(service, account)
+    print(
+        f"trashed_spam={result.trashed_spam} "
+        f"marked_not_spam_read={result.marked_not_spam_read}"
+    )
+    print(
+        f"sc complete: trashed_spam={result.trashed_spam} "
+        f"marked_not_spam_read={result.marked_not_spam_read}"
+    )
+    return 0
+
+
+def _handle_mark_read(service, params: list[str]) -> int:
+    if len(params) != 1:
+        raise UsageError("-mr requires exactly 1 param: <message_id>")
+    message_id = params[0]
+    response = mark_message_read(service, message_id)
+    print(f"marked_read message_id={response.get('id')} thread_id={response.get('threadId')}")
+    return 0
+
+
+def _handle_delete(service, params: list[str]) -> int:
+    if len(params) != 1:
+        raise UsageError("-d requires exactly 1 param: <message_id>")
+    message_id = params[0]
+    delete_message(service, message_id)
+    print(f"deleted message_id={message_id}")
+    return 0
+
+
 def _read_signature(signature_file) -> str:
     signature = signature_file.read_text(encoding="utf-8").strip()
     if not signature:
@@ -337,11 +560,20 @@ def main(argv: list[str] | None = None) -> int:
     if not argv:
         _print_usage_guide()
         return 0
+    first = argv[0].lower()
+    preset_required_commands = {"s", "-s", "ls", "r", "si", "sc", "-mr", "-d"}
+    if first in preset_required_commands:
+        hint = " ".join(argv)
+        raise UsageError(
+            f"Missing preset before command '{argv[0]}'. Example: python main.py <preset> {hint}"
+        )
 
     parser = _build_parser()
     args = parser.parse_args(argv)
 
     if args.upgrade:
+        if args.preset or args.command or args.params:
+            raise UsageError("-u does not accept extra args. Use: python main.py -u")
         return _upgrade_to_latest()
     if not args.preset or not args.command:
         raise UsageError("Expected: <preset> <command>. Use -h for usage.")
@@ -356,12 +588,35 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_send(service, account.email, args.params, signature)
 
     if command == "ls":
-        return _handle_list(service, args.params, config.default_list_limit, account.email)
+        return _handle_list(
+            service,
+            args.params,
+            config.default_list_limit,
+            account.email,
+            config_path=config.path,
+            account=account,
+        )
 
     if command == "r":
         return _handle_reply(service, account.email, args.params, signature)
 
-    raise UsageError(f"Unknown command '{args.command}'. Use s, ls, or r.")
+    if command == "-mr":
+        return _handle_mark_read(service, args.params)
+
+    if command == "-d":
+        return _handle_delete(service, args.params)
+
+    if command == "si":
+        if args.params:
+            raise UsageError("si does not accept extra args. Use: python main.py <preset> si")
+        return _handle_spam_identify(config, account, service)
+
+    if command == "sc":
+        if args.params:
+            raise UsageError("sc does not accept extra args. Use: python main.py <preset> sc")
+        return _handle_spam_clean(account, service)
+
+    raise UsageError(f"Unknown command '{args.command}'. Use s, ls, r, -mr, -d, si, or sc.")
 
 
 if __name__ == "__main__":

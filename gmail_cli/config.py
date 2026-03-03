@@ -15,6 +15,8 @@ class AccountConfig:
     email: str
     client_secret_file: Path
     signature_file: Path
+    spam_senders: list[str]
+    not_spam_senders: list[str]
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,24 @@ class AppConfig:
     path: Path
     accounts: dict[str, AccountConfig]
     default_list_limit: int
+
+
+def normalize_sender_list(values: Any) -> list[str]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        value = item.strip().lower()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
 
 
 def resolve_config_path() -> Path:
@@ -61,6 +81,8 @@ def _validate_account(preset: str, raw: Any, config_path: Path) -> AccountConfig
     email = raw.get("email")
     client_secret = raw.get("client_secret_file")
     signature_file = raw.get("signature_file")
+    spam_senders = normalize_sender_list(raw.get("spam_senders"))
+    not_spam_senders = normalize_sender_list(raw.get("not_spam_senders"))
 
     if not isinstance(email, str) or not email.strip():
         raise ConfigError(
@@ -97,6 +119,8 @@ def _validate_account(preset: str, raw: Any, config_path: Path) -> AccountConfig
         email=email.strip(),
         client_secret_file=client_secret_path,
         signature_file=signature_path,
+        spam_senders=spam_senders,
+        not_spam_senders=not_spam_senders,
     )
 
 
@@ -148,3 +172,31 @@ def get_account(config: AppConfig, preset: str) -> AccountConfig:
             f"Preset '{preset}' not found in {config.path}. Available presets: {available}"
         )
     return account
+
+
+def update_account_sender_lists(
+    config_path: Path,
+    updates: dict[str, dict[str, list[str]]],
+) -> None:
+    config_path = config_path.expanduser()
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"Invalid JSON in config {config_path}: {exc}") from exc
+
+    if not isinstance(raw, dict):
+        raise ConfigError(f"Invalid config at {config_path}: root must be an object")
+    accounts = raw.get("accounts")
+    if not isinstance(accounts, dict):
+        raise ConfigError(f"Invalid config at {config_path}: 'accounts' must be an object")
+
+    for preset, payload in updates.items():
+        account = accounts.get(preset)
+        if not isinstance(account, dict):
+            continue
+        spam_values = normalize_sender_list(payload.get("spam_senders", []))
+        not_spam_values = normalize_sender_list(payload.get("not_spam_senders", []))
+        account["spam_senders"] = spam_values
+        account["not_spam_senders"] = not_spam_values
+
+    config_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from collections import defaultdict
 import io
 import mimetypes
 from email.message import EmailMessage
@@ -385,3 +386,144 @@ def reply_to_thread(
         return service.users().messages().send(userId="me", body=payload).execute()
     except Exception as exc:  # pragma: no cover
         raise ApiError(f"Gmail thread reply failed: {exc}") from exc
+
+
+def list_message_ids(service, gmail_query: str) -> list[str]:
+    message_ids: list[str] = []
+    page_token: str | None = None
+    try:
+        while True:
+            response = (
+                service.users()
+                .messages()
+                .list(
+                    userId="me",
+                    q=gmail_query,
+                    maxResults=500,
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+            for item in response.get("messages", []):
+                message_id = item.get("id")
+                if isinstance(message_id, str) and message_id:
+                    message_ids.append(message_id)
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+    except Exception as exc:  # pragma: no cover
+        raise ApiError(f"Gmail list message ids failed for query '{gmail_query}': {exc}") from exc
+    return message_ids
+
+
+def unread_sender_counts_non_gmail(service, progress_callback=None) -> dict[str, int]:
+    # Exact one-pass count across unread non-gmail messages.
+    message_ids: list[str] = []
+    page_token: str | None = None
+    list_query = "is:unread -from:*@gmail.com"
+    try:
+        while True:
+            response = (
+                service.users()
+                .messages()
+                .list(
+                    userId="me",
+                    q=list_query,
+                    maxResults=500,
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+            for item in response.get("messages", []):
+                message_id = item.get("id")
+                if isinstance(message_id, str) and message_id:
+                    message_ids.append(message_id)
+            if progress_callback is not None:
+                progress_callback("listed_unread_messages", len(message_ids))
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+
+        counts: dict[str, int] = defaultdict(int)
+        total = len(message_ids)
+        for index, message_id in enumerate(message_ids, start=1):
+            details = (
+                service.users()
+                .messages()
+                .get(
+                    userId="me",
+                    id=message_id,
+                    format="metadata",
+                    metadataHeaders=["From"],
+                )
+                .execute()
+            )
+            headers = _headers_to_map(details)
+            sender = parseaddr(headers.get("from", ""))[1].strip().lower()
+            if not sender or sender.endswith("@gmail.com"):
+                continue
+            counts[sender] += 1
+            if progress_callback is not None:
+                progress_callback("counted_sender_messages", index, total)
+        if progress_callback is not None:
+            progress_callback("unique_senders", len(counts))
+    except Exception as exc:  # pragma: no cover
+        raise ApiError(f"Gmail unread sender scan failed: {exc}") from exc
+    return dict(counts)
+
+
+def batch_delete_messages(service, message_ids: list[str]) -> int:
+    if not message_ids:
+        return 0
+    trashed = 0
+    try:
+        for i in range(0, len(message_ids), 1000):
+            chunk = message_ids[i : i + 1000]
+            service.users().messages().batchModify(
+                userId="me",
+                body={"ids": chunk, "addLabelIds": ["TRASH"]},
+            ).execute()
+            trashed += len(chunk)
+    except Exception as exc:  # pragma: no cover
+        raise ApiError(f"Gmail batch trash failed: {exc}") from exc
+    return trashed
+
+
+def batch_mark_messages_read(service, message_ids: list[str]) -> int:
+    if not message_ids:
+        return 0
+    updated = 0
+    try:
+        for i in range(0, len(message_ids), 1000):
+            chunk = message_ids[i : i + 1000]
+            service.users().messages().batchModify(
+                userId="me",
+                body={"ids": chunk, "removeLabelIds": ["UNREAD"]},
+            ).execute()
+            updated += len(chunk)
+    except Exception as exc:  # pragma: no cover
+        raise ApiError(f"Gmail batch mark-read failed: {exc}") from exc
+    return updated
+
+
+def mark_message_read(service, message_id: str) -> dict[str, Any]:
+    try:
+        return (
+            service.users()
+            .messages()
+            .modify(
+                userId="me",
+                id=message_id,
+                body={"removeLabelIds": ["UNREAD"]},
+            )
+            .execute()
+        )
+    except Exception as exc:  # pragma: no cover
+        raise ApiError(f"Failed to mark message '{message_id}' as read: {exc}") from exc
+
+
+def delete_message(service, message_id: str) -> None:
+    try:
+        service.users().messages().trash(userId="me", id=message_id).execute()
+    except Exception as exc:  # pragma: no cover
+        raise ApiError(f"Failed to trash message '{message_id}': {exc}") from exc

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
+import shutil
+import subprocess
 import sys
+import tempfile
 
 from gmail_cli.auth import build_gmail_service
 from gmail_cli.config import get_account, load_config
@@ -15,19 +19,37 @@ from gmail_cli.gmail_api import (
 )
 from gmail_cli.query_parser import parse_declarative_query
 
+__version__ = "0.1.0"
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Declarative Gmail CLI",
         usage=(
+            "python main.py -v\n"
+            "python main.py -u\n"
             "python main.py <preset> s <to> <subject> <body>\n"
             "python main.py <preset> ls <query>\n"
             "python main.py <preset> ls -t <thread_id>\n"
             "python main.py <preset> r <message_id> <body>"
         ),
     )
-    parser.add_argument("preset", help="Account preset key from config.json, e.g. 1")
-    parser.add_argument("command", help="Command: s | -s | ls | r")
+    parser.add_argument(
+        "-v",
+        action="version",
+        version=__version__,
+        help="Show version and exit.",
+    )
+    parser.add_argument(
+        "-u",
+        dest="upgrade",
+        action="store_true",
+        help="Upgrade to latest release using install.sh.",
+    )
+    parser.add_argument(
+        "preset", nargs="?", help="Account preset key from config.json, e.g. 1"
+    )
+    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r")
     parser.add_argument("params", nargs=argparse.REMAINDER, help="Command parameters")
     return parser
 
@@ -38,6 +60,8 @@ def _print_usage_guide() -> None:
             [
                 "Gmail CLI Usage",
                 "",
+                "  python main.py -v",
+                "  python main.py -u",
                 "  python main.py <preset> s <to> <subject> <body>",
                 "  python main.py <preset> ls <query>",
                 "  python main.py <preset> ls -t <thread_id>",
@@ -108,6 +132,33 @@ def _append_signature(body: str, signature: str) -> str:
     return f"{body_clean}\n\n{sig_block}"
 
 
+def _upgrade_to_latest() -> int:
+    curl = shutil.which("curl")
+    bash = shutil.which("bash")
+    if not curl:
+        print("curl not found in PATH.", file=sys.stderr)
+        return 1
+    if not bash:
+        print("bash not found in PATH.", file=sys.stderr)
+        return 1
+
+    url = "https://raw.githubusercontent.com/ryangerardwilson/gmail/main/install.sh"
+    with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        fetch = subprocess.run([curl, "-fsSL", url, "-o", str(tmp_path)], check=False)
+        if fetch.returncode != 0:
+            return fetch.returncode
+        run = subprocess.run([bash, str(tmp_path)], check=False)
+        return run.returncode
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -117,6 +168,11 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    if args.upgrade:
+        return _upgrade_to_latest()
+    if not args.preset or not args.command:
+        raise UsageError("Expected: <preset> <command>. Use -h for usage.")
 
     config = load_config()
     account = get_account(config, args.preset)

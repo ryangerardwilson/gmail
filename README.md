@@ -10,6 +10,12 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## Binary install (release)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ryangerardwilson/gmail/main/install.sh | bash
+```
+
 ## Config
 
 Default path is `~/.config/gmail/config.json` (or `$XDG_CONFIG_HOME/gmail/config.json`).
@@ -44,6 +50,8 @@ Notes:
 ## Usage
 
 ```bash
+python main.py -v
+python main.py -u
 python main.py <preset> s <to> <subject> <body>
 python main.py <preset> ls <query>
 python main.py <preset> ls -t <thread_id>

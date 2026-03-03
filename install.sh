@@ -120,7 +120,7 @@ else
     fi
   fi
 
-  if command -v "${APP}" >/dev/null 2>&1 && [[ "$specific_version" != "latest" ]]; then
+  if command -v "${APP}" >/dev/null 2>&1; then
     installed_version=$(${APP} -v 2>/dev/null || true)
     if [[ -n "$installed_version" && "$installed_version" == "$specific_version" ]]; then
       print_message info "${MUTED}${APP} version ${NC}${specific_version}${MUTED} already installed${NC}"

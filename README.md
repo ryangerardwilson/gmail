@@ -61,7 +61,8 @@ Example:
     }
   },
   "defaults": {
-    "list_limit": 10
+    "list_limit": 10,
+    "timezone_offset": "+05:30"
   }
 }
 ```
@@ -70,6 +71,7 @@ Notes:
 - Token files are managed automatically at `~/.gmail/tokens/<preset>.json`.
 - The CLI auto-creates `~/.gmail/` and `~/.gmail/tokens/`.
 - `signature_file` is required for each account and is appended automatically to all outgoing send/reply bodies.
+- `defaults.timezone_offset` controls displayed message timestamps in output (`±HH:MM`, for example `+05:30` or `-07:00`).
 
 ## Usage
 

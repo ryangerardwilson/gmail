@@ -15,6 +15,7 @@
     }
   },
   "defaults": {
-    "list_limit": 10
+    "list_limit": 10,
+    "timezone_offset": "+05:30"
   }
 }

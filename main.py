@@ -454,6 +454,7 @@ def _audit_message_batch(
     spam_senders: list[str],
     spam_set: set[str],
     service,
+    utc_offset: str,
 ) -> tuple[int, int, bool]:
     audited = 0
     trashed = 0
@@ -461,7 +462,7 @@ def _audit_message_batch(
 
     for index, message in enumerate(messages, start=1):
         audited += 1
-        row = summarize_message(message)
+        row = summarize_message(message, utc_offset=utc_offset)
         sender = parseaddr(row.get("from", ""))[1].strip().lower() or row.get("from_email", "").strip().lower()
         message_id = str(message.get("id", ""))
         print(f"\n[{index}/{len(messages)}] message_id={message_id}")
@@ -512,6 +513,7 @@ def _handle_list(
     params: list[str],
     default_limit: int,
     my_email: str,
+    utc_offset: str = "+05:30",
     config_path=None,
     account=None,
 ) -> int:
@@ -521,19 +523,19 @@ def _handle_list(
     if params[0] == "-ur":
         max_results = _parse_optional_limit("ls -ur", params, default_limit)
         messages = list_messages(service, "is:unread", max_results)
-        print(render_messages_table(messages, my_email))
+        print(render_messages_table(messages, my_email, utc_offset=utc_offset))
         return 0
 
     if params[0] == "-r":
         max_results = _parse_optional_limit("ls -r", params, default_limit)
         messages = list_messages(service, f"is:read -from:{my_email}", max_results)
-        print(render_messages_table(messages, my_email))
+        print(render_messages_table(messages, my_email, utc_offset=utc_offset))
         return 0
 
     if params[0] == "-snt":
         if len(params) == 1:
             messages = list_messages(service, "in:sent", default_limit)
-            print(render_messages_table(messages, my_email))
+            print(render_messages_table(messages, my_email, utc_offset=utc_offset))
             return 0
         if len(params) == 2:
             try:
@@ -542,7 +544,7 @@ def _handle_list(
                 max_results = -1
             if max_results > 0:
                 messages = list_messages(service, "in:sent", max_results)
-                print(render_messages_table(messages, my_email))
+                print(render_messages_table(messages, my_email, utc_offset=utc_offset))
                 return 0
             if max_results == 0:
                 raise UsageError("ls -snt limit must be > 0")
@@ -550,21 +552,21 @@ def _handle_list(
         sent_query = "in:sent " + " ".join(params[1:])
         parsed = parse_declarative_query(sent_query, default_limit)
         messages = list_messages(service, parsed.gmail_query, parsed.max_results)
-        print(render_messages_table(messages, my_email))
+        print(render_messages_table(messages, my_email, utc_offset=utc_offset))
         return 0
 
     if params[0] == "-ura":
         if config_path is None or account is None:
             raise UsageError("Internal error: ls -ura requires account context")
         return _run_audit_mode(
-            service, params, default_limit, config_path, account, "is:unread", "unread", "ura"
+            service, params, default_limit, config_path, account, "is:unread", "unread", "ura", utc_offset
         )
 
     if params[0] == "-ra":
         if config_path is None or account is None:
             raise UsageError("Internal error: ls -ra requires account context")
         return _run_audit_mode(
-            service, params, default_limit, config_path, account, "is:read", "read", "ra"
+            service, params, default_limit, config_path, account, "is:read", "read", "ra", utc_offset
         )
 
     if params[0] == "-t":
@@ -572,13 +574,13 @@ def _handle_list(
             raise UsageError("ls -t requires exactly 1 param: <thread_id>")
         thread_id = params[1]
         messages = get_thread_messages(service, thread_id)
-        print(render_messages_table(messages, my_email))
+        print(render_messages_table(messages, my_email, utc_offset=utc_offset))
         return 0
 
     query = " ".join(params)
     parsed = parse_declarative_query(query, default_limit)
     messages = list_messages(service, parsed.gmail_query, parsed.max_results)
-    print(render_messages_table(messages, my_email))
+    print(render_messages_table(messages, my_email, utc_offset=utc_offset))
     return 0
 
 
@@ -591,6 +593,7 @@ def _run_audit_mode(
     gmail_query: str,
     mode_label: str,
     mode_flag: str,
+    utc_offset: str,
 ) -> int:
     if config_path is None or account is None:
         raise UsageError("Internal error: audit mode requires account context")
@@ -620,7 +623,7 @@ def _run_audit_mode(
             batch_index += 1
             print(f"\nProcessing {mode_label} batch {batch_index} ({len(messages)} messages)")
             audited_delta, trashed_delta, stopped = _audit_message_batch(
-                messages, spam_senders, spam_set, service
+                messages, spam_senders, spam_set, service, utc_offset
             )
             audited += audited_delta
             trashed += trashed_delta
@@ -636,7 +639,7 @@ def _run_audit_mode(
             print(f"No {mode_label} messages found.")
             return 0
         audited_delta, trashed_delta, _ = _audit_message_batch(
-            messages, spam_senders, spam_set, service
+            messages, spam_senders, spam_set, service, utc_offset
         )
         audited += audited_delta
         trashed += trashed_delta
@@ -923,7 +926,9 @@ def _handle_mark_read(service, params: list[str]) -> int:
     return 0
 
 
-def _handle_open_message(service, params: list[str], my_email: str) -> int:
+def _handle_open_message(
+    service, params: list[str], my_email: str, utc_offset: str = "+05:30"
+) -> int:
     if not params:
         raise UsageError("o requires: <message_id> or -t <thread_id>")
 
@@ -943,7 +948,7 @@ def _handle_open_message(service, params: list[str], my_email: str) -> int:
         message = get_message(service, target_id, format_type="full")
         downloaded = download_message_attachments(service, message, Path.cwd())
         response = mark_message_read(service, target_id)
-        print(render_message_open(message, my_email))
+        print(render_message_open(message, my_email, utc_offset=utc_offset))
         if downloaded:
             print(f"attachments_downloaded={len(downloaded)} cwd={Path.cwd()}")
             for path in downloaded:
@@ -966,7 +971,7 @@ def _handle_open_message(service, params: list[str], my_email: str) -> int:
             message_ids.append(message_id)
         all_downloaded.extend(download_message_attachments(service, message, Path.cwd()))
         print(f"[{idx}/{len(messages)}]")
-        print(render_message_open(message, my_email))
+        print(render_message_open(message, my_email, utc_offset=utc_offset))
         if idx < len(messages):
             print("")
 
@@ -1166,6 +1171,7 @@ def main(argv: list[str] | None = None) -> int:
             args.params,
             config.default_list_limit,
             account.email,
+            utc_offset=config.timezone_offset,
             config_path=config.path,
             account=account,
         )
@@ -1175,7 +1181,9 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_reply(service, account.email, args.params, signature, account.contacts)
 
     if command == "o":
-        return _handle_open_message(service, args.params, account.email)
+        return _handle_open_message(
+            service, args.params, account.email, utc_offset=config.timezone_offset
+        )
 
     if command == "mr":
         return _handle_mark_read(service, args.params)

@@ -56,9 +56,62 @@ class ConfigTests(unittest.TestCase):
 
             config = load_config(config_path)
             self.assertEqual(config.default_list_limit, 5)
+            self.assertEqual(config.timezone_offset, "+05:30")
             self.assertEqual(config.accounts["1"].email, "user@example.com")
             self.assertEqual(config.accounts["1"].spam_senders, [])
             self.assertEqual(config.accounts["1"].contacts, {})
+
+    def test_load_config_timezone_offset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            secret = tmp / "client_secret.json"
+            signature = tmp / "sig.txt"
+            secret.write_text("{}", encoding="utf-8")
+            signature.write_text("Best", encoding="utf-8")
+            config_path = tmp / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "accounts": {
+                            "1": {
+                                "email": "user@example.com",
+                                "client_secret_file": str(secret),
+                                "signature_file": str(signature),
+                            }
+                        },
+                        "defaults": {"list_limit": 5, "timezone_offset": "-07:00"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = load_config(config_path)
+            self.assertEqual(config.timezone_offset, "-07:00")
+
+    def test_load_config_rejects_bad_timezone_offset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            secret = tmp / "client_secret.json"
+            signature = tmp / "sig.txt"
+            secret.write_text("{}", encoding="utf-8")
+            signature.write_text("Best", encoding="utf-8")
+            config_path = tmp / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "accounts": {
+                            "1": {
+                                "email": "user@example.com",
+                                "client_secret_file": str(secret),
+                                "signature_file": str(signature),
+                            }
+                        },
+                        "defaults": {"timezone_offset": "IST"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ConfigError):
+                load_config(config_path)
 
     def test_load_config_rejects_bad_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

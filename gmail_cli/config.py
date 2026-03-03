@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,25 @@ class AppConfig:
     path: Path
     accounts: dict[str, AccountConfig]
     default_list_limit: int
+    timezone_offset: str = "+05:30"
+
+
+_TIMEZONE_OFFSET_RE = re.compile(r"^[+-](?:[01]\d|2[0-3]):[0-5]\d$")
+
+
+def validate_timezone_offset(value: Any, config_path: Path) -> str:
+    if value is None:
+        return "+05:30"
+    if not isinstance(value, str):
+        raise ConfigError(
+            f"Invalid config at {config_path}: defaults.timezone_offset must be a string like '+05:30'"
+        )
+    normalized = value.strip()
+    if not _TIMEZONE_OFFSET_RE.match(normalized):
+        raise ConfigError(
+            f"Invalid config at {config_path}: defaults.timezone_offset must match ±HH:MM (example: '+05:30')"
+        )
+    return normalized
 
 
 def normalize_sender_list(values: Any) -> list[str]:
@@ -183,7 +203,14 @@ def load_config(path: Path | None = None) -> AppConfig:
             f"Invalid config at {config_path}: defaults.list_limit must be a positive integer"
         )
 
-    return AppConfig(path=config_path, accounts=accounts, default_list_limit=default_limit)
+    timezone_offset = validate_timezone_offset(defaults_raw.get("timezone_offset"), config_path)
+
+    return AppConfig(
+        path=config_path,
+        accounts=accounts,
+        default_list_limit=default_limit,
+        timezone_offset=timezone_offset,
+    )
 
 
 def get_account(config: AppConfig, preset: str) -> AccountConfig:

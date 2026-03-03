@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import base64
+from datetime import timedelta, timezone
 import os
 import re
 from email.utils import parseaddr
 from email.utils import parsedate_to_datetime
 from typing import Any
-from zoneinfo import ZoneInfo
-
-IST = ZoneInfo("Asia/Kolkata")
 ANSI_RESET = "\033[0m"
 ANSI_GRAY = "\033[38;5;245m"
 ANSI_WHITE = "\033[97m"
@@ -64,15 +62,22 @@ def _extract_any_body(payload: dict[str, Any]) -> str:
     return ""
 
 
-def _to_ist_date(raw_date: str) -> str:
+def _timezone_from_offset(utc_offset: str) -> timezone:
+    sign = 1 if utc_offset.startswith("+") else -1
+    hours = int(utc_offset[1:3])
+    minutes = int(utc_offset[4:6])
+    return timezone(sign * timedelta(hours=hours, minutes=minutes))
+
+
+def _to_local_date(raw_date: str, utc_offset: str) -> str:
     if not raw_date:
         return ""
     try:
         dt = parsedate_to_datetime(raw_date)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-        ist_dt = dt.astimezone(IST)
-        return ist_dt.strftime("%Y-%m-%d %H:%M:%S")
+            dt = dt.replace(tzinfo=timezone.utc)
+        local_dt = dt.astimezone(_timezone_from_offset(utc_offset))
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         return raw_date
 
@@ -148,7 +153,9 @@ def _trim_body(body: str, max_lines: int = 24, max_chars: int = 2000) -> str:
     return body_text
 
 
-def summarize_message(message: dict[str, Any], trim_body: bool = True) -> dict[str, str]:
+def summarize_message(
+    message: dict[str, Any], trim_body: bool = True, utc_offset: str = "+05:30"
+) -> dict[str, str]:
     headers = _header_map(message)
     from_raw = headers.get("from", "")
     from_name, from_email = parseaddr(from_raw)
@@ -174,7 +181,7 @@ def summarize_message(message: dict[str, Any], trim_body: bool = True) -> dict[s
         "cc": headers.get("cc", ""),
         "bcc": headers.get("bcc", ""),
         "subject": headers.get("subject", ""),
-        "date": _to_ist_date(headers.get("date", "")),
+        "date": _to_local_date(headers.get("date", ""), utc_offset),
         "body": body.strip() or str(message.get("snippet", "")).strip(),
         "snippet": str(message.get("snippet", "")).strip(),
     }
@@ -187,21 +194,23 @@ def _apply_color(block: str, is_from_me: bool) -> str:
     return f"{color}{block}{ANSI_RESET}"
 
 
-def render_messages_table(messages: list[dict[str, Any]], my_email: str) -> str:
+def render_messages_table(
+    messages: list[dict[str, Any]], my_email: str, utc_offset: str = "+05:30"
+) -> str:
     if not messages:
         return "No messages found."
 
     my_email_normalized = my_email.strip().lower()
     sections: list[str] = []
     for i, msg in enumerate(messages, start=1):
-        row = summarize_message(msg)
+        row = summarize_message(msg, utc_offset=utc_offset)
         prefix = f"[{i}]"
         header = prefix + ("-" * max(1, 79 - len(prefix)))
         lines = [
             header,
             f"message_id: {row['message_id']}",
             f"thread_id : {row['thread_id']}",
-            f"date_ist  : {row['date']}",
+            f"date      : {row['date']}",
             f"from      : {row['from']}",
             f"subject   : {row['subject']}",
         ]
@@ -211,12 +220,14 @@ def render_messages_table(messages: list[dict[str, Any]], my_email: str) -> str:
     return "\n".join(sections)
 
 
-def render_message_open(message: dict[str, Any], my_email: str) -> str:
-    row = summarize_message(message, trim_body=False)
+def render_message_open(
+    message: dict[str, Any], my_email: str, utc_offset: str = "+05:30"
+) -> str:
+    row = summarize_message(message, trim_body=False, utc_offset=utc_offset)
     lines = [
         f"message_id: {row['message_id']}",
         f"thread_id : {row['thread_id']}",
-        f"date_ist  : {row['date']}",
+        f"date      : {row['date']}",
         f"from      : {row['from']}",
         f"to        : {row['to']}",
     ]

@@ -155,7 +155,7 @@ else
 
   extracted_binary="$tmp_dir/${APP}/${APP}"
   if [[ ! -f "$extracted_binary" ]]; then
-    extracted_binary="$(find "$tmp_dir" -type f -name "$APP" 2>/dev/null | head -n 1 || true)"
+    extracted_binary="$(find "$tmp_dir" -type f -name "$APP" -perm -111 2>/dev/null | head -n 1 || true)"
   fi
   if [[ -z "$extracted_binary" || ! -f "$extracted_binary" ]]; then
     print_message error "Archive did not contain expected binary '${APP}'"
@@ -163,16 +163,40 @@ else
     exit 1
   fi
 
-  payload_dir="$(dirname "$extracted_binary")"
+  bundle_dir=""
+  while IFS= read -r dir; do
+    if [[ -f "$dir/${APP}" && -d "$dir/_internal" ]]; then
+      bundle_dir="$dir"
+      break
+    fi
+  done < <(find "$tmp_dir" -type f -name "$APP" -perm -111 -printf '%h\n' 2>/dev/null | sort -u)
+  if [[ -z "$bundle_dir" ]]; then
+    payload_dir="$(dirname "$extracted_binary")"
+    if [[ -f "$payload_dir/${APP}" ]]; then
+      bundle_dir="$payload_dir"
+    fi
+  fi
+  if [[ -z "$bundle_dir" || ! -f "$bundle_dir/${APP}" ]]; then
+    print_message error "Could not locate extracted app bundle directory for '${APP}'."
+    print_message info  "${MUTED}See available release assets:${NC} https://github.com/${REPO}/releases"
+    exit 1
+  fi
+
   rm -rf "$APP_DIR"
   mkdir -p "$APP_DIR/${APP}"
-  if [[ "$payload_dir" == "$tmp_dir" ]]; then
-    cp "$extracted_binary" "$APP_DIR/${APP}/${APP}"
-    if [[ -d "$tmp_dir/_internal" ]]; then
-      cp -a "$tmp_dir/_internal" "$APP_DIR/${APP}/_internal"
-    fi
-  else
-    cp -a "$payload_dir/." "$APP_DIR/${APP}/"
+  cp -a "$bundle_dir/." "$APP_DIR/${APP}/"
+
+  if [[ ! -d "$APP_DIR/${APP}/_internal" ]]; then
+    print_message error "Installed bundle is missing '_internal' runtime directory."
+    print_message info  "Installed from: $(basename "$archive_path")"
+    print_message info  "${MUTED}See available release assets:${NC} https://github.com/${REPO}/releases"
+    exit 1
+  fi
+  if [[ ! -f "$APP_DIR/${APP}/_internal/libpython3.11.so.1.0" ]]; then
+    print_message error "Installed runtime is missing libpython3.11.so.1.0"
+    print_message info  "Installed from: $(basename "$archive_path")"
+    print_message info  "${MUTED}See available release assets:${NC} https://github.com/${REPO}/releases"
+    exit 1
   fi
   chmod 755 "$APP_DIR/${APP}/${APP}"
   rm -rf "$tmp_dir"

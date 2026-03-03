@@ -161,6 +161,70 @@ class MainCommandTests(unittest.TestCase):
         update_payload = update_mock.call_args.args[1]
         self.assertEqual(update_payload["1"]["spam_senders"], [])
 
+    def test_handle_list_unread_audit_gmail_sender_protected(self) -> None:
+        service = MagicMock()
+        account = AccountConfig(
+            preset="1",
+            email="me@example.com",
+            client_secret_file=MagicMock(),
+            signature_file=MagicMock(),
+            spam_senders=[],
+            not_spam_senders=[],
+        )
+        messages = [
+            {
+                "id": "m1",
+                "threadId": "t1",
+                "snippet": "hello",
+                "payload": {
+                    "headers": [
+                        {"name": "From", "value": "Person <person@gmail.com>"},
+                        {"name": "Subject", "value": "Hi"},
+                        {"name": "Date", "value": "Mon, 1 Jan 2024 10:00:00 +0000"},
+                    ]
+                },
+            }
+        ]
+        with patch("main.list_messages", return_value=messages), patch(
+            "main.input", side_effect=["t"]
+        ), patch("main.delete_message") as delete_mock, patch(
+            "main.update_account_sender_lists"
+        ) as update_mock:
+            code = _handle_list(
+                service,
+                ["-ura", "1"],
+                default_limit=10,
+                my_email="me@example.com",
+                config_path="/tmp/config.json",
+                account=account,
+            )
+        self.assertEqual(code, 0)
+        delete_mock.assert_not_called()
+        update_payload = update_mock.call_args.args[1]
+        self.assertEqual(update_payload["1"]["spam_senders"], [])
+
+    def test_handle_list_read_audit_custom_limit(self) -> None:
+        service = MagicMock()
+        account = AccountConfig(
+            preset="1",
+            email="me@example.com",
+            client_secret_file=MagicMock(),
+            signature_file=MagicMock(),
+            spam_senders=[],
+            not_spam_senders=[],
+        )
+        with patch("main.list_messages", return_value=[] ) as list_messages_mock:
+            code = _handle_list(
+                service,
+                ["-ra", "5"],
+                default_limit=10,
+                my_email="me@example.com",
+                config_path="/tmp/config.json",
+                account=account,
+            )
+        self.assertEqual(code, 0)
+        list_messages_mock.assert_called_once_with(service, "is:read", 5)
+
 
 if __name__ == "__main__":
     unittest.main()

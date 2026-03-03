@@ -49,6 +49,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> ls <query>\n"
             "gmail <preset> ls -ur [limit]\n"
             "gmail <preset> ls -ura [limit]\n"
+            "gmail <preset> ls -ra [limit]\n"
             "gmail <preset> ls -t <thread_id>\n"
             "gmail <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "gmail <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
@@ -90,6 +91,7 @@ def _print_usage_guide() -> None:
                 "  gmail <preset> ls <query>",
                 "  gmail <preset> ls -ur [limit]",
                 "  gmail <preset> ls -ura [limit]",
+                "  gmail <preset> ls -ra [limit]",
                 "  gmail <preset> ls -t <thread_id>",
                 "  gmail <preset> r [-a] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "  gmail <preset> r [-a] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
@@ -107,6 +109,8 @@ def _print_usage_guide() -> None:
                 "  gmail 1 ls -ur 1",
                 "  # Audit unread emails",
                 "  gmail 1 ls -ura 10",
+                "  # Audit read emails",
+                "  gmail 1 ls -ra 10",
                 "  gmail 1 ls \"to silvia limit 1\"",
                 "  gmail 1 ls -t \"19ca756c06a7ebcd\"",
                 "",
@@ -230,6 +234,68 @@ def _parse_optional_limit(flag: str, params: list[str], default_limit: int) -> i
     return max_results
 
 
+def _is_gmail_sender(sender_email: str) -> bool:
+    return sender_email.strip().lower().endswith("@gmail.com")
+
+
+def _audit_message_batch(
+    messages: list[dict],
+    spam_senders: list[str],
+    spam_set: set[str],
+    service,
+) -> tuple[int, int, bool]:
+    audited = 0
+    trashed = 0
+    stopped = False
+
+    for index, message in enumerate(messages, start=1):
+        audited += 1
+        row = summarize_message(message)
+        sender = parseaddr(row.get("from", ""))[1].strip().lower() or row.get("from_email", "").strip().lower()
+        message_id = str(message.get("id", ""))
+        print(f"\n[{index}/{len(messages)}] message_id={message_id}")
+        print(f"from    : {row.get('from', '')}")
+        print(f"subject : {row.get('subject', '')}")
+        print(f"date    : {row.get('date', '')}")
+        body_preview = row.get("body", "").strip() or str(message.get("snippet", ""))
+        print("body:")
+        print(body_preview)
+
+        while True:
+            choice = input("action [s=spam, t=trash only, n=not spam, q=quit]: ").strip().lower()
+            if choice not in {"s", "t", "n", "q"}:
+                print("Invalid input. Use s, t, n, or q.")
+                continue
+            break
+
+        if choice == "q":
+            audited -= 1
+            stopped = True
+            break
+        if choice == "n":
+            continue
+
+        if _is_gmail_sender(sender):
+            print("gmail sender protected: message not trashed")
+            continue
+
+        delete_message(service, message_id)
+        trashed += 1
+        if choice == "t":
+            print(f"trashed message_id={message_id}")
+            continue
+
+        if not sender:
+            print("trashed message, but could not parse sender email for spam_senders update")
+            continue
+        if sender not in spam_set:
+            spam_set.add(sender)
+            spam_senders.append(sender)
+        print(f"trashed message_id={message_id} and added sender to spam_senders: {sender}")
+
+    return audited, trashed, stopped
+
+
 def _handle_list(
     service,
     params: list[str],
@@ -250,132 +316,16 @@ def _handle_list(
     if params[0] == "-ura":
         if config_path is None or account is None:
             raise UsageError("Internal error: ls -ura requires account context")
-        spam_senders = list(account.spam_senders)
-        spam_set = set(spam_senders)
-        trashed = 0
-        audited = 0
-        stopped = False
-
-        print(
-            "Unread audit mode: enter 's' for spam (add sender to spam_senders + trash message), "
-            "'t' for trash only, 'n' for not spam (leave unread), 'q' to stop."
+        return _run_audit_mode(
+            service, params, default_limit, config_path, account, "is:unread", "unread", "ura"
         )
-        if len(params) == 1:
-            page_token: str | None = None
-            batch_index = 0
-            while True:
-                messages, next_page = list_messages_page(
-                    service, "is:unread", max_results=10, page_token=page_token
-                )
-                if not messages:
-                    if audited == 0:
-                        print("No unread messages found.")
-                    break
 
-                batch_index += 1
-                print(f"\nProcessing unread batch {batch_index} ({len(messages)} messages)")
-                for index, message in enumerate(messages, start=1):
-                    audited += 1
-                    row = summarize_message(message)
-                    sender = parseaddr(row.get("from", ""))[1].strip().lower() or row.get("from_email", "").strip().lower()
-                    message_id = str(message.get("id", ""))
-                    print(f"\n[{index}/{len(messages)}] message_id={message_id}")
-                    print(f"from    : {row.get('from', '')}")
-                    print(f"subject : {row.get('subject', '')}")
-                    print(f"date    : {row.get('date', '')}")
-                    body_preview = row.get("body", "").strip() or str(message.get("snippet", ""))
-                    print("body:")
-                    print(body_preview)
-
-                    while True:
-                        choice = input("action [s=spam, t=trash only, n=not spam, q=quit]: ").strip().lower()
-                        if choice not in {"s", "t", "n", "q"}:
-                            print("Invalid input. Use s, t, n, or q.")
-                            continue
-                        break
-
-                    if choice == "q":
-                        audited -= 1
-                        stopped = True
-                        break
-                    if choice == "n":
-                        continue
-                    delete_message(service, message_id)
-                    trashed += 1
-                    if choice == "t":
-                        print(f"trashed message_id={message_id}")
-                        continue
-
-                    if not sender:
-                        print("trashed message, but could not parse sender email for spam_senders update")
-                        continue
-                    if sender not in spam_set:
-                        spam_set.add(sender)
-                        spam_senders.append(sender)
-                    print(f"trashed message_id={message_id} and added sender to spam_senders: {sender}")
-
-                if stopped:
-                    break
-                if not next_page:
-                    break
-                page_token = next_page
-        else:
-            max_results = _parse_optional_limit("ls -ura", params, default_limit)
-            messages = list_messages(service, "is:unread", max_results)
-            if not messages:
-                print("No unread messages found.")
-                return 0
-
-            for index, message in enumerate(messages, start=1):
-                audited += 1
-                row = summarize_message(message)
-                sender = parseaddr(row.get("from", ""))[1].strip().lower() or row.get("from_email", "").strip().lower()
-                message_id = str(message.get("id", ""))
-                print(f"\n[{index}/{len(messages)}] message_id={message_id}")
-                print(f"from    : {row.get('from', '')}")
-                print(f"subject : {row.get('subject', '')}")
-                print(f"date    : {row.get('date', '')}")
-                body_preview = row.get("body", "").strip() or str(message.get("snippet", ""))
-                print("body:")
-                print(body_preview)
-
-                while True:
-                    choice = input("action [s=spam, t=trash only, n=not spam, q=quit]: ").strip().lower()
-                    if choice not in {"s", "t", "n", "q"}:
-                        print("Invalid input. Use s, t, n, or q.")
-                        continue
-                    break
-
-                if choice == "q":
-                    audited -= 1
-                    break
-                if choice == "n":
-                    continue
-                delete_message(service, message_id)
-                trashed += 1
-                if choice == "t":
-                    print(f"trashed message_id={message_id}")
-                    continue
-
-                if not sender:
-                    print("trashed message, but could not parse sender email for spam_senders update")
-                    continue
-                if sender not in spam_set:
-                    spam_set.add(sender)
-                    spam_senders.append(sender)
-                print(f"trashed message_id={message_id} and added sender to spam_senders: {sender}")
-
-        update_account_sender_lists(
-            config_path,
-            {
-                account.preset: {
-                    "spam_senders": spam_senders,
-                    "not_spam_senders": account.not_spam_senders,
-                }
-            },
+    if params[0] == "-ra":
+        if config_path is None or account is None:
+            raise UsageError("Internal error: ls -ra requires account context")
+        return _run_audit_mode(
+            service, params, default_limit, config_path, account, "is:read", "read", "ra"
         )
-        print(f"ls -ura complete: audited={audited} trashed={trashed}")
-        return 0
 
     if params[0] == "-t":
         if len(params) != 2:
@@ -389,6 +339,78 @@ def _handle_list(
     parsed = parse_declarative_query(query, default_limit)
     messages = list_messages(service, parsed.gmail_query, parsed.max_results)
     print(render_messages_table(messages, my_email))
+    return 0
+
+
+def _run_audit_mode(
+    service,
+    params,
+    default_limit,
+    config_path,
+    account,
+    gmail_query: str,
+    mode_label: str,
+    mode_flag: str,
+) -> int:
+    if config_path is None or account is None:
+        raise UsageError("Internal error: audit mode requires account context")
+
+    spam_senders = list(account.spam_senders)
+    spam_set = set(spam_senders)
+    trashed = 0
+    audited = 0
+
+    print(
+        "Audit mode: enter 's' for spam (add sender to spam_senders + trash message), "
+        "'t' for trash only, 'n' for not spam (leave unchanged), 'q' to stop."
+    )
+
+    if len(params) == 1:
+        page_token: str | None = None
+        batch_index = 0
+        while True:
+            messages, next_page = list_messages_page(
+                service, gmail_query, max_results=10, page_token=page_token
+            )
+            if not messages:
+                if audited == 0:
+                    print(f"No {mode_label} messages found.")
+                break
+
+            batch_index += 1
+            print(f"\nProcessing {mode_label} batch {batch_index} ({len(messages)} messages)")
+            audited_delta, trashed_delta, stopped = _audit_message_batch(
+                messages, spam_senders, spam_set, service
+            )
+            audited += audited_delta
+            trashed += trashed_delta
+            if stopped:
+                break
+            if not next_page:
+                break
+            page_token = next_page
+    else:
+        max_results = _parse_optional_limit(f"ls -{mode_flag}", params, default_limit)
+        messages = list_messages(service, gmail_query, max_results)
+        if not messages:
+            print(f"No {mode_label} messages found.")
+            return 0
+        audited_delta, trashed_delta, _ = _audit_message_batch(
+            messages, spam_senders, spam_set, service
+        )
+        audited += audited_delta
+        trashed += trashed_delta
+
+    update_account_sender_lists(
+        config_path,
+        {
+            account.preset: {
+                "spam_senders": spam_senders,
+                "not_spam_senders": account.not_spam_senders,
+            }
+        },
+    )
+    print(f"ls -{mode_flag} complete: audited={audited} trashed={trashed}")
     return 0
 
 

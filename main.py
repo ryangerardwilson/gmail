@@ -15,6 +15,7 @@ from gmail_cli.gmail_api import (
     get_thread_messages,
     list_messages,
     reply_to_message,
+    reply_to_thread,
     send_email,
 )
 from gmail_cli.query_parser import parse_declarative_query
@@ -31,7 +32,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "python main.py <preset> s <to> <subject> <body>\n"
             "python main.py <preset> ls <query>\n"
             "python main.py <preset> ls -t <thread_id>\n"
-            "python main.py <preset> r <message_id> <body>"
+            "python main.py <preset> r [-a] <message_id> <body>\n"
+            "python main.py <preset> r [-a] -t <thread_id> <body>"
         ),
     )
     parser.add_argument(
@@ -65,7 +67,8 @@ def _print_usage_guide() -> None:
                 "  python main.py <preset> s <to> <subject> <body>",
                 "  python main.py <preset> ls <query>",
                 "  python main.py <preset> ls -t <thread_id>",
-                "  python main.py <preset> r <message_id> <body>",
+                "  python main.py <preset> r [-a] <message_id> <body>",
+                "  python main.py <preset> r [-a] -t <thread_id> <body>",
                 "",
                 "Examples:",
                 "  python main.py 1 s \"xyz@example.com\" \"Hello\" \"Body\"",
@@ -73,6 +76,9 @@ def _print_usage_guide() -> None:
                 "  python main.py 1 ls \"to silvia limit 1\"",
                 "  python main.py 1 ls -t \"19ca756c06a7ebcd\"",
                 "  python main.py 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
+                "  python main.py 1 r -a \"19caef2cd6494116\" \"Thanks all.\"",
+                "  python main.py 1 r -t \"19ca756c06a7ebcd\" \"Following up on this thread.\"",
+                "  python main.py 1 r -ta \"19ca756c06a7ebcd\" \"Thanks everyone.\"",
             ]
         )
     )
@@ -107,12 +113,44 @@ def _handle_list(service, params: list[str], default_limit: int, my_email: str) 
     return 0
 
 
-def _handle_reply(service, from_email: str, params: list[str]) -> int:
-    if len(params) != 2:
-        raise UsageError("Reply requires 2 params: <message_id> <body>")
+def _parse_reply_args(params: list[str]) -> tuple[bool, bool, str, str]:
+    if not params:
+        raise UsageError(
+            "Reply requires: [-a] <message_id> <body> or [-a] -t <thread_id> <body>"
+        )
 
-    message_id, body = params
-    response = reply_to_message(service, from_email, message_id, body)
+    flags: set[str] = set()
+    index = 0
+    while index < len(params):
+        token = params[index]
+        if token == "--":
+            index += 1
+            break
+        if not token.startswith("-") or token == "-":
+            break
+        for flag in token[1:]:
+            if flag not in {"a", "t"}:
+                raise UsageError(f"Unknown reply option '-{flag}'. Supported: -a, -t, -at, -ta")
+            flags.add(flag)
+        index += 1
+
+    remaining = params[index:]
+    target_name = "thread_id" if "t" in flags else "message_id"
+    if len(remaining) != 2:
+        raise UsageError(
+            f"Reply requires 2 params after flags: <{target_name}> <body>"
+        )
+
+    target_id, body = remaining
+    return "t" in flags, "a" in flags, target_id, body
+
+
+def _handle_reply(service, from_email: str, params: list[str]) -> int:
+    use_thread, reply_all, target_id, body = _parse_reply_args(params)
+    if use_thread:
+        response = reply_to_thread(service, from_email, target_id, body, reply_all=reply_all)
+    else:
+        response = reply_to_message(service, from_email, target_id, body, reply_all=reply_all)
     print(f"replied message_id={response.get('id')} thread_id={response.get('threadId')}")
     return 0
 
@@ -189,8 +227,16 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_list(service, args.params, config.default_list_limit, account.email)
 
     if command == "r":
-        if len(args.params) == 2:
-            args.params[1] = _append_signature(args.params[1], signature)
+        parsed = _parse_reply_args(args.params)
+        use_thread, reply_all, target_id, body = parsed
+        signed_body = _append_signature(body, signature)
+        reply_params: list[str] = []
+        if reply_all:
+            reply_params.append("-a")
+        if use_thread:
+            reply_params.append("-t")
+        reply_params.extend([target_id, signed_body])
+        args.params = reply_params
         return _handle_reply(service, account.email, args.params)
 
     raise UsageError(f"Unknown command '{args.command}'. Use s, ls, or r.")

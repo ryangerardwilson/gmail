@@ -55,7 +55,8 @@ python main.py -u
 python main.py <preset> s <to> <subject> <body>
 python main.py <preset> ls <query>
 python main.py <preset> ls -t <thread_id>
-python main.py <preset> r <message_id> <body>
+python main.py <preset> r [-a] <message_id> <body>
+python main.py <preset> r [-a] -t <thread_id> <body>
 ```
 
 Examples:
@@ -66,7 +67,15 @@ python main.py 1 ls "from maanas limit 1"
 python main.py 1 ls "to silvia limit 1"
 python main.py 1 ls -t "19ca756c06a7ebcd"
 python main.py 1 r "18f3abc..." "Thanks, sharing this now."
+python main.py 1 r -a "18f3abc..." "Thanks everyone."
+python main.py 1 r -t "19ca756c06a7ebcd" "Following up on this thread."
+python main.py 1 r -ta "19ca756c06a7ebcd" "Thanks all."
 ```
+
+Reply flags:
+- `-a`: reply-all, keeps original Cc recipients (excluding your own address).
+- `-t`: treat target id as `thread_id` instead of `message_id`.
+- You can combine as `-ta` or `-at`.
 
 ## First run auth
 

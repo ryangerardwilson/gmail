@@ -10,6 +10,26 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## Google OAuth setup
+
+1. Open Google Cloud Console and create/select a project.
+2. Enable the Gmail API for that project.
+3. Configure OAuth consent screen:
+   - choose `External` (or `Internal` if Workspace-only),
+   - add app name/support email,
+   - add test users if app is still in testing mode.
+4. Create OAuth credentials:
+   - `APIs & Services` -> `Credentials` -> `Create Credentials` -> `OAuth client ID`,
+   - Application type: `Desktop app`,
+   - download the client JSON.
+5. Put that JSON path into each account's `client_secret_file` in config.
+6. Run any command (for example `gmail 1 ls -ur 1`) to trigger first-time browser auth.
+
+Required permissions/scopes used by this CLI:
+- `https://www.googleapis.com/auth/gmail.send` (send/reply)
+- `https://www.googleapis.com/auth/gmail.readonly` (list/read)
+- `https://www.googleapis.com/auth/gmail.modify` (mark read/trash/spam cleanup)
+
 ## Binary install (release)
 
 ```bash

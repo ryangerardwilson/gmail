@@ -51,7 +51,6 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.default_list_limit, 5)
             self.assertEqual(config.accounts["1"].email, "user@example.com")
             self.assertEqual(config.accounts["1"].spam_senders, [])
-            self.assertEqual(config.accounts["1"].not_spam_senders, [])
 
     def test_load_config_rejects_bad_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -109,15 +108,11 @@ class ConfigTests(unittest.TestCase):
             update_account_sender_lists(
                 config_path,
                 {
-                    "1": {
-                        "spam_senders": ["Spam@X.com", "spam@x.com"],
-                        "not_spam_senders": ["friend@y.com"],
-                    }
+                    "1": ["Spam@X.com", "spam@x.com"],
                 },
             )
             config = load_config(config_path)
             self.assertEqual(config.accounts["1"].spam_senders, ["spam@x.com"])
-            self.assertEqual(config.accounts["1"].not_spam_senders, ["friend@y.com"])
 
 
 if __name__ == "__main__":

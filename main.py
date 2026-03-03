@@ -26,7 +26,6 @@ from gmail_cli.gmail_api import (
 from gmail_cli.query_parser import parse_declarative_query
 from gmail_cli.spam_flow import (
     make_identify_decision,
-    parse_exclusion_indexes,
     run_cleanup_for_account,
     run_identify_for_account,
 )
@@ -43,8 +42,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail -u\n"
             "gmail <preset> si\n"
             "gmail <preset> sc\n"
-            "gmail <preset> -mr <message_id>\n"
-            "gmail <preset> -d <message_id>\n"
+            "gmail <preset> sa <spam_email1,spam_email2,...>\n"
+            "gmail <preset> mr <message_id>\n"
+            "gmail <preset> d <message_id>\n"
             "gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "gmail <preset> ls <query>\n"
             "gmail <preset> ls -ur [limit]\n"
@@ -70,7 +70,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "preset", nargs="?", help="Account preset key from config.json, e.g. 1"
     )
-    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | -mr | -d | si | sc")
+    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | mr | d | si | sc | sa")
     parser.add_argument("params", nargs=argparse.REMAINDER, help="Command parameters")
     return parser
 
@@ -85,8 +85,9 @@ def _print_usage_guide() -> None:
                 "  gmail -u",
                 "  gmail <preset> si",
                 "  gmail <preset> sc",
-                "  gmail <preset> -mr <message_id>",
-                "  gmail <preset> -d <message_id>",
+                "  gmail <preset> sa <spam_email1,spam_email2,...>",
+                "  gmail <preset> mr <message_id>",
+                "  gmail <preset> d <message_id>",
                 "  gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "  gmail <preset> ls <query>",
                 "  gmail <preset> ls -ur [limit]",
@@ -115,8 +116,8 @@ def _print_usage_guide() -> None:
                 "  gmail 1 ls -t \"19ca756c06a7ebcd\"",
                 "",
                 "  # Single-message utilities",
-                "  gmail 1 -mr \"19caef2cd6494116\"",
-                "  gmail 1 -d \"19caef2cd6494116\"",
+                "  gmail 1 mr \"19caef2cd6494116\"",
+                "  gmail 1 d \"19caef2cd6494116\"",
                 "",
                 "  # Reply",
                 "  gmail 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
@@ -130,6 +131,7 @@ def _print_usage_guide() -> None:
                 "  # Spam flow",
                 "  gmail 1 si",
                 "  gmail 1 sc",
+                "  gmail 1 sa \"spam1@example.com,spam2@example.com\"",
             ]
         )
     )
@@ -403,12 +405,7 @@ def _run_audit_mode(
 
     update_account_sender_lists(
         config_path,
-        {
-            account.preset: {
-                "spam_senders": spam_senders,
-                "not_spam_senders": account.not_spam_senders,
-            }
-        },
+        {account.preset: spam_senders},
     )
     print(f"ls -{mode_flag} complete: audited={audited} trashed={trashed}")
     return 0
@@ -533,66 +530,46 @@ def _handle_spam_identify(config, account, service) -> int:
     print("potential spam senders (>5 unread, non-gmail):")
     for index, item in enumerate(candidates, start=1):
         print(f"  {index}. {item.sender} (unread={item.unread_count})")
-
-    exclusions_raw = input(
-        "enter item numbers to exclude into not_spam (comma-separated, blank for none): "
-    )
-    try:
-        excluded = parse_exclusion_indexes(exclusions_raw, len(candidates))
-    except ValueError as exc:
-        raise UsageError(str(exc)) from exc
-
-    decision = make_identify_decision(candidates, excluded)
-    if not decision.add_to_spam and not decision.add_to_not_spam:
+    decision = make_identify_decision(candidates)
+    if not decision.add_to_spam:
         print("no list updates requested")
         return 0
 
-    print(
-        f"review: add_to_spam={len(decision.add_to_spam)} "
-        f"add_to_not_spam={len(decision.add_to_not_spam)}"
-    )
+    print(f"review: add_to_spam={len(decision.add_to_spam)}")
     confirm = input("confirm update config? [y/N]: ").strip().lower()
     if confirm != "y":
         print("skipped by user")
         return 0
 
     merged_spam = _merge_unique(account.spam_senders, decision.add_to_spam)
-    merged_not_spam = _merge_unique(account.not_spam_senders, decision.add_to_not_spam)
-    update_account_sender_lists(
-        config.path,
-        {
-            preset: {
-                "spam_senders": merged_spam,
-                "not_spam_senders": merged_not_spam,
-            }
-        },
-    )
-    print(
-        f"updated: +{len(decision.add_to_spam)} spam, +{len(decision.add_to_not_spam)} not_spam"
-    )
-    print(
-        f"si complete: spam_added={len(decision.add_to_spam)} "
-        f"not_spam_added={len(decision.add_to_not_spam)}"
-    )
+    update_account_sender_lists(config.path, {preset: merged_spam})
+    print(f"updated: +{len(decision.add_to_spam)} spam")
+    print(f"si complete: spam_added={len(decision.add_to_spam)}")
     return 0
 
 
 def _handle_spam_clean(account, service) -> int:
     result = run_cleanup_for_account(service, account)
-    print(
-        f"trashed_spam={result.trashed_spam} "
-        f"marked_not_spam_read={result.marked_not_spam_read}"
-    )
-    print(
-        f"sc complete: trashed_spam={result.trashed_spam} "
-        f"marked_not_spam_read={result.marked_not_spam_read}"
-    )
+    print(f"trashed_spam={result.trashed_spam}")
+    print(f"sc complete: trashed_spam={result.trashed_spam}")
+    return 0
+
+
+def _handle_spam_add(config, account, params: list[str]) -> int:
+    if len(params) != 1:
+        raise UsageError("sa requires exactly 1 param: <spam_email1,spam_email2,...>")
+    new_items = normalize_sender_list([item.strip() for item in params[0].split(",")])
+    if not new_items:
+        raise UsageError("sa requires at least one valid email in comma-separated input")
+    merged = _merge_unique(account.spam_senders, new_items)
+    update_account_sender_lists(config.path, {account.preset: merged})
+    print(f"sa complete: added={len(new_items)} total_spam_senders={len(merged)}")
     return 0
 
 
 def _handle_mark_read(service, params: list[str]) -> int:
     if len(params) != 1:
-        raise UsageError("-mr requires exactly 1 param: <message_id>")
+        raise UsageError("mr requires exactly 1 param: <message_id>")
     message_id = params[0]
     response = mark_message_read(service, message_id)
     print(f"marked_read message_id={response.get('id')} thread_id={response.get('threadId')}")
@@ -601,7 +578,7 @@ def _handle_mark_read(service, params: list[str]) -> int:
 
 def _handle_delete(service, params: list[str]) -> int:
     if len(params) != 1:
-        raise UsageError("-d requires exactly 1 param: <message_id>")
+        raise UsageError("d requires exactly 1 param: <message_id>")
     message_id = params[0]
     delete_message(service, message_id)
     print(f"deleted message_id={message_id}")
@@ -657,7 +634,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_usage_guide()
         return 0
     first = argv[0].lower()
-    preset_required_commands = {"s", "-s", "ls", "r", "si", "sc", "-mr", "-d"}
+    preset_required_commands = {"s", "-s", "ls", "r", "si", "sc", "sa", "mr", "d"}
     if first in preset_required_commands:
         hint = " ".join(argv)
         raise UsageError(
@@ -696,10 +673,10 @@ def main(argv: list[str] | None = None) -> int:
     if command == "r":
         return _handle_reply(service, account.email, args.params, signature)
 
-    if command == "-mr":
+    if command == "mr":
         return _handle_mark_read(service, args.params)
 
-    if command == "-d":
+    if command == "d":
         return _handle_delete(service, args.params)
 
     if command == "si":
@@ -712,7 +689,10 @@ def main(argv: list[str] | None = None) -> int:
             raise UsageError("sc does not accept extra args. Use: gmail <preset> sc")
         return _handle_spam_clean(account, service)
 
-    raise UsageError(f"Unknown command '{args.command}'. Use s, ls, r, -mr, -d, si, or sc.")
+    if command == "sa":
+        return _handle_spam_add(config, account, args.params)
+
+    raise UsageError(f"Unknown command '{args.command}'. Use s, ls, r, mr, d, si, sc, or sa.")
 
 
 if __name__ == "__main__":

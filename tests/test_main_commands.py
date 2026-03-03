@@ -48,6 +48,26 @@ class MainCommandTests(unittest.TestCase):
         with self.assertRaises(UsageError):
             main(["-u", "3"])
 
+    def test_sa_adds_spam_senders(self) -> None:
+        with patch("main.load_config") as load_config_mock, patch(
+            "main.get_account"
+        ) as get_account_mock, patch("main.build_gmail_service"), patch(
+            "main._read_signature", return_value="sig"
+        ), patch("main.update_account_sender_lists") as update_mock:
+            config = MagicMock()
+            config.path = Path("/tmp/config.json")
+            load_config_mock.return_value = config
+            get_account_mock.return_value = AccountConfig(
+                preset="1",
+                email="me@example.com",
+                client_secret_file=MagicMock(),
+                signature_file=MagicMock(),
+                spam_senders=["old@spam.com"],
+            )
+            code = main(["1", "sa", "new@spam.com,old@spam.com"])
+        self.assertEqual(code, 0)
+        update_mock.assert_called_once()
+
     def test_handle_list_unread_audit_bad_limit(self) -> None:
         service = MagicMock()
         with self.assertRaises(UsageError):
@@ -61,7 +81,6 @@ class MainCommandTests(unittest.TestCase):
             client_secret_file=MagicMock(),
             signature_file=MagicMock(),
             spam_senders=[],
-            not_spam_senders=[],
         )
         messages = [
             {
@@ -93,7 +112,7 @@ class MainCommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         delete_mock.assert_called_once_with(service, "m1")
         update_payload = update_mock.call_args.args[1]
-        self.assertIn("spam@x.com", update_payload["1"]["spam_senders"])
+        self.assertIn("spam@x.com", update_payload["1"])
 
     def test_handle_list_unread_audit_no_limit_uses_batches(self) -> None:
         service = MagicMock()
@@ -103,7 +122,6 @@ class MainCommandTests(unittest.TestCase):
             client_secret_file=MagicMock(),
             signature_file=MagicMock(),
             spam_senders=[],
-            not_spam_senders=[],
         )
         with patch("main.list_messages_page", return_value=([], None) ) as list_page_mock, patch(
             "main.update_account_sender_lists"
@@ -127,7 +145,6 @@ class MainCommandTests(unittest.TestCase):
             client_secret_file=MagicMock(),
             signature_file=MagicMock(),
             spam_senders=[],
-            not_spam_senders=[],
         )
         messages = [
             {
@@ -159,7 +176,7 @@ class MainCommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         delete_mock.assert_called_once_with(service, "m1")
         update_payload = update_mock.call_args.args[1]
-        self.assertEqual(update_payload["1"]["spam_senders"], [])
+        self.assertEqual(update_payload["1"], [])
 
     def test_handle_list_unread_audit_gmail_sender_protected(self) -> None:
         service = MagicMock()
@@ -169,7 +186,6 @@ class MainCommandTests(unittest.TestCase):
             client_secret_file=MagicMock(),
             signature_file=MagicMock(),
             spam_senders=[],
-            not_spam_senders=[],
         )
         messages = [
             {
@@ -201,7 +217,7 @@ class MainCommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         delete_mock.assert_not_called()
         update_payload = update_mock.call_args.args[1]
-        self.assertEqual(update_payload["1"]["spam_senders"], [])
+        self.assertEqual(update_payload["1"], [])
 
     def test_handle_list_read_audit_custom_limit(self) -> None:
         service = MagicMock()
@@ -211,7 +227,6 @@ class MainCommandTests(unittest.TestCase):
             client_secret_file=MagicMock(),
             signature_file=MagicMock(),
             spam_senders=[],
-            not_spam_senders=[],
         )
         with patch("main.list_messages", return_value=[] ) as list_messages_mock:
             code = _handle_list(

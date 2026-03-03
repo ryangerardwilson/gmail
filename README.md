@@ -49,8 +49,7 @@ Example:
       "email": "first@yourdomain.com",
       "client_secret_file": "/home/you/.config/gmail/client_secret.json",
       "signature_file": "/home/you/.config/gmail/signatures/account1.txt",
-      "spam_senders": ["annoying@promo.biz"],
-      "not_spam_senders": ["alerts@yourbank.com"]
+      "spam_senders": ["annoying@promo.biz"]
     },
     "2": {
       "email": "second@yourdomain.com",
@@ -76,8 +75,9 @@ gmail -v
 gmail -u
 gmail <preset> si
 gmail <preset> sc
-gmail <preset> -mr <message_id>
-gmail <preset> -d <message_id>
+gmail <preset> sa <spam_email1,spam_email2,...>
+gmail <preset> mr <message_id>
+gmail <preset> d <message_id>
 gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 gmail <preset> ls <query>
 gmail <preset> ls -ur [limit]
@@ -109,8 +109,8 @@ gmail 1 ls "to silvia limit 1"
 gmail 1 ls -t "19ca756c06a7ebcd"
 
 # Single-message utilities
-gmail 1 -mr "18f3abc..."
-gmail 1 -d "18f3abc..."
+gmail 1 mr "18f3abc..."
+gmail 1 d "18f3abc..."
 
 # Reply
 gmail 1 r "18f3abc..." "Thanks, sharing this now."
@@ -124,6 +124,7 @@ gmail 1 r -ta "19ca756c06a7ebcd" "Thanks all."
 # Spam flow
 gmail 1 si
 gmail 1 sc
+gmail 1 sa "spam1@example.com,spam2@example.com"
 ```
 
 Reply flags:
@@ -135,12 +136,13 @@ Reply flags:
 - `-atch`: attach one or more file/dir paths; directories are attached as generated `.zip` files (trailing option, after required args).
 
 Spam flow commands:
-- `si` (spam identify): scans unread non-`@gmail.com` messages and counts sender occurrences, then lists senders with more than 5 unread mails. It prompts for exclusions and writes updates to `spam_senders` / `not_spam_senders` in config.
-- `sc` (spam clean): deletes unread messages from `spam_senders` and marks unread messages from `not_spam_senders` as read.
+- `si` (spam identify): scans unread non-`@gmail.com` messages and counts sender occurrences, then lists senders with more than 5 unread mails and (on confirm) adds them to `spam_senders`.
+- `sc` (spam clean): trashes unread messages from `spam_senders`.
+- `sa "<spam_email1,spam_email2,...>"`: manually add one or more senders to `spam_senders`.
 
 Message utilities:
-- `-mr <message_id>`: mark a single message as read.
-- `-d <message_id>`: delete a single message.
+- `mr <message_id>`: mark a single message as read.
+- `d <message_id>`: delete a single message.
 - `ls -ur [limit]`: list unread messages only; if `limit` is omitted, uses config default list limit.
 - `ls -ura [limit]`: interactive unread audit. Without `limit`, audits all unread messages continuously in batches of 10. For each unread message: `s` marks spam (adds sender to `spam_senders` and trashes message), `t` trashes message without spam-list update, `n` leaves message unread, `q` stops audit.
 - `ls -ra [limit]`: interactive read-mail audit with the same actions as `-ura`; without `limit`, processes read messages continuously in batches of 10.

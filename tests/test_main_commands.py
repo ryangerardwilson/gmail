@@ -8,6 +8,7 @@ from main import (
     _handle_list,
     _handle_mark_spammer,
     _handle_mark_read,
+    _handle_mark_read_all,
     _handle_mark_unread,
     _handle_open_message,
     _parse_editor_template,
@@ -285,6 +286,17 @@ class MainCommandTests(unittest.TestCase):
             _handle_list(service, ["-r", "1"], default_limit=10, my_email="me@example.com")
         list_messages_mock.assert_called_once_with(service, "is:read -from:me@example.com", 1)
 
+    def test_handle_list_external_limit(self) -> None:
+        service = MagicMock()
+        with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            code = _handle_list(service, ["-ext", "10"], default_limit=10, my_email="me@example.com")
+        self.assertEqual(code, 0)
+        list_messages_mock.assert_called_once_with(
+            service, "-from:me@example.com -from:*@example.com", 10
+        )
+
     def test_handle_list_sent_default_limit(self) -> None:
         service = MagicMock()
         with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
@@ -359,6 +371,16 @@ class MainCommandTests(unittest.TestCase):
             code = _handle_mark_unread(service, ["m1"])
         self.assertEqual(code, 0)
         mark_mock.assert_called_once_with(service, "m1")
+
+    def test_handle_mark_read_all(self) -> None:
+        service = MagicMock()
+        with patch("main.list_message_ids", return_value=["m1", "m2"]) as list_ids_mock, patch(
+            "main.batch_mark_messages_read", return_value=2
+        ) as batch_mock:
+            code = _handle_mark_read_all(service, [])
+        self.assertEqual(code, 0)
+        list_ids_mock.assert_called_once_with(service, "is:unread")
+        batch_mock.assert_called_once_with(service, ["m1", "m2"])
 
     def test_handle_mark_spammer(self) -> None:
         service = MagicMock()

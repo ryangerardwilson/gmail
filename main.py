@@ -31,6 +31,7 @@ from gmail_cli.gmail_api import (
     get_thread_messages,
     list_messages,
     list_messages_page,
+    list_message_ids,
     mark_message_read,
     mark_message_unread,
     reply_to_message,
@@ -66,6 +67,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> o <message_id>\n"
             "gmail <preset> o -t <thread_id>\n"
             "gmail <preset> mr <message_id>\n"
+            "gmail <preset> mra\n"
             "gmail <preset> mur <message_id>\n"
             "gmail <preset> d <message_id>\n"
             "gmail <preset> ms <message_id>\n"
@@ -74,6 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> ls <query>\n"
             "gmail <preset> ls -ur [limit]\n"
             "gmail <preset> ls -r [limit]\n"
+            "gmail <preset> ls -ext <limit>\n"
             "gmail <preset> ls -snt [limit|query]\n"
             "gmail <preset> ls -ura [limit]\n"
             "gmail <preset> ls -ra [limit]\n"
@@ -97,7 +100,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "preset", nargs="?", help="Account preset key from config.json, e.g. 1"
     )
-    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | o | mr | mur | d | ms | si | sc | sa | se | cn")
+    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | o | mr | mra | mur | d | ms | si | sc | sa | se | cn")
     parser.add_argument("params", nargs=argparse.REMAINDER, help="Command parameters")
     return parser
 
@@ -123,6 +126,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail <preset> o <message_id>",
                 "  gmail <preset> o -t <thread_id>",
                 "  gmail <preset> mr <message_id>",
+                "  gmail <preset> mra",
                 "  gmail <preset> mur <message_id>",
                 "  gmail <preset> d <message_id>",
                 "  gmail <preset> ms <message_id>",
@@ -131,6 +135,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail <preset> ls <query>",
                 "  gmail <preset> ls -ur [limit]",
                 "  gmail <preset> ls -r [limit]",
+                "  gmail <preset> ls -ext <limit>",
                 "  gmail <preset> ls -snt [limit|query]",
                 "  gmail <preset> ls -ura [limit]",
                 "  gmail <preset> ls -ra [limit]",
@@ -158,6 +163,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 ls -ur 1",
                 "  gmail 1 ls -r",
                 "  gmail 1 ls -r 1",
+                "  gmail 1 ls -ext 10",
                 "  gmail 1 ls -snt 10",
                 "  gmail 1 ls -snt \"silvia\"",
                 "  # Audit unread emails",
@@ -171,6 +177,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 o \"19caef2cd6494116\"",
                 "  gmail 1 o -t \"19ca756c06a7ebcd\"",
                 "  gmail 1 mr \"19caef2cd6494116\"",
+                "  gmail 1 mra",
                 "  gmail 1 mur \"19caef2cd6494116\"",
                 "  gmail 1 d \"19caef2cd6494116\"",
                 "  gmail 1 ms \"19caef2cd6494116\"",
@@ -535,6 +542,23 @@ def _handle_list(
     if params[0] == "-r":
         max_results = _parse_optional_limit("ls -r", params, default_limit)
         messages = list_messages(service, f"is:read -from:{my_email}", max_results)
+        print(render_messages_table(messages, my_email, utc_offset=utc_offset))
+        return 0
+
+    if params[0] == "-ext":
+        if len(params) != 2:
+            raise UsageError("ls -ext requires exactly 1 param: <limit>")
+        try:
+            max_results = int(params[1])
+        except ValueError as exc:
+            raise UsageError("ls -ext limit must be a positive integer") from exc
+        if max_results <= 0:
+            raise UsageError("ls -ext limit must be > 0")
+        domain = my_email.split("@", 1)[1].strip().lower() if "@" in my_email else ""
+        ext_query = f"-from:{my_email}"
+        if domain:
+            ext_query += f" -from:*@{domain}"
+        messages = list_messages(service, ext_query, max_results)
         print(render_messages_table(messages, my_email, utc_offset=utc_offset))
         return 0
 
@@ -944,6 +968,15 @@ def _handle_mark_read(service, params: list[str]) -> int:
     return 0
 
 
+def _handle_mark_read_all(service, params: list[str]) -> int:
+    if params:
+        raise UsageError("mra does not accept params. Use: gmail <preset> mra")
+    message_ids = list_message_ids(service, "is:unread")
+    updated = batch_mark_messages_read(service, message_ids)
+    print(f"marked_read_all={updated}")
+    return 0
+
+
 def _handle_open_message(
     service, params: list[str], my_email: str, utc_offset: str = "+05:30"
 ) -> int:
@@ -1154,7 +1187,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_usage_guide(show_examples=False, show_usage=True)
         return 0
     first = argv[0].lower()
-    preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "se", "mr", "mur", "d", "ms", "cn"}
+    preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "se", "mr", "mra", "mur", "d", "ms", "cn"}
     if first in preset_required_commands:
         hint = " ".join(argv)
         raise UsageError(
@@ -1206,6 +1239,9 @@ def main(argv: list[str] | None = None) -> int:
     if command == "mr":
         return _handle_mark_read(service, args.params)
 
+    if command == "mra":
+        return _handle_mark_read_all(service, args.params)
+
     if command == "mur":
         return _handle_mark_unread(service, args.params)
 
@@ -1235,7 +1271,7 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_contacts(config, account, args.params)
 
     raise UsageError(
-        f"Unknown command '{args.command}'. Use s, ls, r, o, mr, mur, d, ms, si, sc, sa, se, or cn."
+        f"Unknown command '{args.command}'. Use s, ls, r, o, mr, mra, mur, d, ms, si, sc, sa, se, or cn."
     )
 
 

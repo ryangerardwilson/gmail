@@ -92,6 +92,7 @@ gmail <preset> cn -e
 gmail <preset> o <message_id>
 gmail <preset> o -t <thread_id>
 gmail <preset> mr <message_id>
+gmail <preset> mra
 gmail <preset> mur <message_id>
 gmail <preset> d <message_id>
 gmail <preset> ms <message_id>
@@ -100,6 +101,7 @@ gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <pa
 gmail <preset> ls <query>
 gmail <preset> ls -ur [limit]
 gmail <preset> ls -r [limit]
+gmail <preset> ls -ext <limit>
 gmail <preset> ls -snt [limit|query]
 gmail <preset> ls -ura [limit]
 gmail <preset> ls -ra [limit]
@@ -129,6 +131,7 @@ gmail 1 ls -ur
 gmail 1 ls -ur 1
 gmail 1 ls -r
 gmail 1 ls -r 1
+gmail 1 ls -ext 10
 gmail 1 ls -snt 10
 gmail 1 ls -snt "silvia"
 # Audit unread emails
@@ -142,6 +145,7 @@ gmail 1 ls -t "19ca756c06a7ebcd"
 gmail 1 o "18f3abc..."
 gmail 1 o -t "19ca756c06a7ebcd"
 gmail 1 mr "18f3abc..."
+gmail 1 mra
 gmail 1 mur "18f3abc..."
 gmail 1 d "18f3abc..."
 gmail 1 ms "18f3abc..."
@@ -210,11 +214,13 @@ Message utilities:
 - `o <message_id>`: open one message with full body output, mark it as read, and download attachments to current working directory.
 - `o -t <thread_id>`: open all messages in a thread (ascending order), apply existing color formatting per message, mark all thread messages as read, and download attachments to current working directory.
 - `mr <message_id>`: mark a single message as read.
+- `mra`: mark all unread messages as read.
 - `mur <message_id>`: mark a single message as unread.
 - `d <message_id>`: delete a single message.
 - `ms <message_id>`: mark sender as spam (adds sender to `spam_senders` subject to safety normalization) and trashes the message.
 - `ls -ur [limit]`: list unread messages only; if `limit` is omitted, uses config default list limit.
 - `ls -r [limit]`: list read received messages only (excludes sent); if `limit` is omitted, uses config default list limit.
+- `ls -ext <limit>`: list external-domain messages only (excludes your own sender address and your preset domain).
 - `ls -snt [limit|query]`: list/search sent messages. If `limit` is numeric, it limits sent results. Otherwise it is treated as a sent query.
 - `ls` output is summary-only (message metadata). Use `o` to view full body.
 - `ls -ura [limit]`: interactive unread audit. Without `limit`, audits all unread messages continuously in batches of 10. For each unread message: `s` marks spam (adds sender to `spam_senders` and trashes message), `t` trashes message without spam-list update, `n` leaves message unread, `q` stops audit.

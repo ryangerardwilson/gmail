@@ -73,14 +73,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> ms <message_id>\n"
             "gmail <preset> s -e\n"
             "gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
-            "gmail <preset> ls <query>\n"
-            "gmail <preset> ls -ur [limit]\n"
-            "gmail <preset> ls -r [limit]\n"
-            "gmail <preset> ls -ext <limit>\n"
-            "gmail <preset> ls -snt [limit|query]\n"
+            "gmail <preset> ls [-o] <query>\n"
+            "gmail <preset> ls [-o] -ur [limit]\n"
+            "gmail <preset> ls [-o] -r [limit]\n"
+            "gmail <preset> ls [-o] -ext <limit>\n"
+            "gmail <preset> ls [-o] -snt [limit|query]\n"
             "gmail <preset> ls -ura [limit]\n"
             "gmail <preset> ls -ra [limit]\n"
-            "gmail <preset> ls -t <thread_id>\n"
+            "gmail <preset> ls [-o] -t <thread_id>\n"
             "gmail <preset> r [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
         ),
@@ -132,14 +132,14 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail <preset> ms <message_id>",
                 "  gmail <preset> s -e",
                 "  gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
-                "  gmail <preset> ls <query>",
-                "  gmail <preset> ls -ur [limit]",
-                "  gmail <preset> ls -r [limit]",
-                "  gmail <preset> ls -ext <limit>",
-                "  gmail <preset> ls -snt [limit|query]",
+                "  gmail <preset> ls [-o] <query>",
+                "  gmail <preset> ls [-o] -ur [limit]",
+                "  gmail <preset> ls [-o] -r [limit]",
+                "  gmail <preset> ls [-o] -ext <limit>",
+                "  gmail <preset> ls [-o] -snt [limit|query]",
                 "  gmail <preset> ls -ura [limit]",
                 "  gmail <preset> ls -ra [limit]",
-                "  gmail <preset> ls -t <thread_id>",
+                "  gmail <preset> ls [-o] -t <thread_id>",
                 "  gmail <preset> r [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 "  gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
                 ""
@@ -166,6 +166,8 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 ls -ext 10",
                 "  gmail 1 ls -snt 10",
                 "  gmail 1 ls -snt \"silvia\"",
+                "  gmail 1 ls -o \"from xyz limit 1\"",
+                "  gmail 1 ls -o -ur 1",
                 "  # Audit unread emails",
                 "  gmail 1 ls -ura 10",
                 "  # Audit read emails",
@@ -521,6 +523,43 @@ def _audit_message_batch(
     return audited, trashed, stopped
 
 
+def _extract_list_open_flag(params: list[str]) -> tuple[bool, list[str]]:
+    open_mode = False
+    filtered: list[str] = []
+    for token in params:
+        if token == "-o":
+            open_mode = True
+            continue
+        filtered.append(token)
+    return open_mode, filtered
+
+
+def _print_list_results(
+    service,
+    messages: list[dict],
+    my_email: str,
+    utc_offset: str,
+    open_mode: bool,
+) -> None:
+    print(render_messages_table(messages, my_email, utc_offset=utc_offset))
+    if not open_mode or not messages:
+        return
+
+    message_ids: list[str] = []
+    print("")
+    for index, message in enumerate(messages, start=1):
+        message_id = str(message.get("id", "")).strip()
+        if message_id:
+            message_ids.append(message_id)
+        print(f"[{index}/{len(messages)}]")
+        print(render_message_open(message, my_email, utc_offset=utc_offset))
+        if index < len(messages):
+            print("")
+
+    marked_read = batch_mark_messages_read(service, message_ids)
+    print(f"ls_opened messages={len(messages)} marked_read={marked_read}")
+
+
 def _handle_list(
     service,
     params: list[str],
@@ -530,26 +569,29 @@ def _handle_list(
     config_path=None,
     account=None,
 ) -> int:
-    if not params:
+    open_mode, filtered_params = _extract_list_open_flag(params)
+    if not filtered_params:
         raise UsageError("ls requires a query string, e.g. \"from maanas limit 1\"")
+    if filtered_params[0] in {"-ura", "-ra"} and open_mode:
+        raise UsageError("ls -o is not supported with -ura or -ra")
 
-    if params[0] == "-ur":
-        max_results = _parse_optional_limit("ls -ur", params, default_limit)
+    if filtered_params[0] == "-ur":
+        max_results = _parse_optional_limit("ls -ur", filtered_params, default_limit)
         messages = list_messages(service, "is:unread", max_results)
-        print(render_messages_table(messages, my_email, utc_offset=utc_offset))
+        _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
-    if params[0] == "-r":
-        max_results = _parse_optional_limit("ls -r", params, default_limit)
+    if filtered_params[0] == "-r":
+        max_results = _parse_optional_limit("ls -r", filtered_params, default_limit)
         messages = list_messages(service, f"is:read -from:{my_email}", max_results)
-        print(render_messages_table(messages, my_email, utc_offset=utc_offset))
+        _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
-    if params[0] == "-ext":
-        if len(params) != 2:
+    if filtered_params[0] == "-ext":
+        if len(filtered_params) != 2:
             raise UsageError("ls -ext requires exactly 1 param: <limit>")
         try:
-            max_results = int(params[1])
+            max_results = int(filtered_params[1])
         except ValueError as exc:
             raise UsageError("ls -ext limit must be a positive integer") from exc
         if max_results <= 0:
@@ -559,58 +601,58 @@ def _handle_list(
         if domain:
             ext_query += f" -from:*@{domain}"
         messages = list_messages(service, ext_query, max_results)
-        print(render_messages_table(messages, my_email, utc_offset=utc_offset))
+        _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
-    if params[0] == "-snt":
-        if len(params) == 1:
+    if filtered_params[0] == "-snt":
+        if len(filtered_params) == 1:
             messages = list_messages(service, "in:sent", default_limit)
-            print(render_messages_table(messages, my_email, utc_offset=utc_offset))
+            _print_list_results(service, messages, my_email, utc_offset, open_mode)
             return 0
-        if len(params) == 2:
+        if len(filtered_params) == 2:
             try:
-                max_results = int(params[1])
+                max_results = int(filtered_params[1])
             except ValueError:
                 max_results = -1
             if max_results > 0:
                 messages = list_messages(service, "in:sent", max_results)
-                print(render_messages_table(messages, my_email, utc_offset=utc_offset))
+                _print_list_results(service, messages, my_email, utc_offset, open_mode)
                 return 0
             if max_results == 0:
                 raise UsageError("ls -snt limit must be > 0")
 
-        sent_query = "in:sent " + " ".join(params[1:])
+        sent_query = "in:sent " + " ".join(filtered_params[1:])
         parsed = parse_declarative_query(sent_query, default_limit)
         messages = list_messages(service, parsed.gmail_query, parsed.max_results)
-        print(render_messages_table(messages, my_email, utc_offset=utc_offset))
+        _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
-    if params[0] == "-ura":
+    if filtered_params[0] == "-ura":
         if config_path is None or account is None:
             raise UsageError("Internal error: ls -ura requires account context")
         return _run_audit_mode(
-            service, params, default_limit, config_path, account, "is:unread", "unread", "ura", utc_offset
+            service, filtered_params, default_limit, config_path, account, "is:unread", "unread", "ura", utc_offset
         )
 
-    if params[0] == "-ra":
+    if filtered_params[0] == "-ra":
         if config_path is None or account is None:
             raise UsageError("Internal error: ls -ra requires account context")
         return _run_audit_mode(
-            service, params, default_limit, config_path, account, "is:read", "read", "ra", utc_offset
+            service, filtered_params, default_limit, config_path, account, "is:read", "read", "ra", utc_offset
         )
 
-    if params[0] == "-t":
-        if len(params) != 2:
+    if filtered_params[0] == "-t":
+        if len(filtered_params) != 2:
             raise UsageError("ls -t requires exactly 1 param: <thread_id>")
-        thread_id = params[1]
+        thread_id = filtered_params[1]
         messages = get_thread_messages(service, thread_id)
-        print(render_messages_table(messages, my_email, utc_offset=utc_offset))
+        _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
-    query = " ".join(params)
+    query = " ".join(filtered_params)
     parsed = parse_declarative_query(query, default_limit)
     messages = list_messages(service, parsed.gmail_query, parsed.max_results)
-    print(render_messages_table(messages, my_email, utc_offset=utc_offset))
+    _print_list_results(service, messages, my_email, utc_offset, open_mode)
     return 0
 
 

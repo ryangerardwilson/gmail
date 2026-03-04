@@ -324,6 +324,51 @@ class MainCommandTests(unittest.TestCase):
         parse_mock.assert_called_once_with("in:sent silvia", 5)
         list_messages_mock.assert_called_once_with(service, "in:sent silvia", 7)
 
+    def test_handle_list_open_mode_prints_bodies_and_marks_read(self) -> None:
+        service = MagicMock()
+        messages = [{"id": "m1"}, {"id": "m2"}]
+        with patch("main.list_messages", return_value=messages) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ), patch("main.render_message_open", return_value="opened") as render_open_mock, patch(
+            "main.batch_mark_messages_read", return_value=2
+        ) as mark_batch_mock:
+            code = _handle_list(
+                service,
+                ["-o", "-ur", "2"],
+                default_limit=10,
+                my_email="me@example.com",
+            )
+        self.assertEqual(code, 0)
+        list_messages_mock.assert_called_once_with(service, "is:unread", 2)
+        self.assertEqual(render_open_mock.call_count, 2)
+        mark_batch_mock.assert_called_once_with(service, ["m1", "m2"])
+
+    def test_handle_list_open_mode_with_query(self) -> None:
+        service = MagicMock()
+        messages = [{"id": "m1"}]
+        with patch(
+            "main.parse_declarative_query",
+            return_value=MagicMock(gmail_query="from:xyz", max_results=1),
+        ) as parse_mock, patch("main.list_messages", return_value=messages), patch(
+            "main.render_messages_table", return_value="table"
+        ), patch("main.render_message_open", return_value="opened"), patch(
+            "main.batch_mark_messages_read", return_value=1
+        ) as mark_batch_mock:
+            code = _handle_list(
+                service,
+                ["from", "xyz", "limit", "1", "-o"],
+                default_limit=10,
+                my_email="me@example.com",
+            )
+        self.assertEqual(code, 0)
+        parse_mock.assert_called_once_with("from xyz limit 1", 10)
+        mark_batch_mock.assert_called_once_with(service, ["m1"])
+
+    def test_handle_list_open_mode_rejects_audit_flags(self) -> None:
+        service = MagicMock()
+        with self.assertRaises(UsageError):
+            _handle_list(service, ["-o", "-ura", "1"], default_limit=10, my_email="me@example.com")
+
     def test_handle_mark_read(self) -> None:
         service = MagicMock()
         with patch("main.mark_message_read", return_value={"id": "m1", "threadId": "t1"}) as mark_mock:

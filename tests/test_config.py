@@ -11,6 +11,7 @@ from gmail_cli.config import (
     normalize_sender_list,
     resolve_config_path,
     update_account_contacts,
+    update_account_spam_excludes,
     update_account_sender_lists,
 )
 from gmail_cli.errors import ConfigError
@@ -59,6 +60,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.timezone_offset, "+05:30")
             self.assertEqual(config.accounts["1"].email, "user@example.com")
             self.assertEqual(config.accounts["1"].spam_senders, [])
+            self.assertEqual(config.accounts["1"].spam_excludes, [])
             self.assertEqual(config.accounts["1"].contacts, {})
 
     def test_load_config_timezone_offset(self) -> None:
@@ -209,6 +211,40 @@ class ConfigTests(unittest.TestCase):
             )
             config = load_config(config_path)
             self.assertEqual(config.accounts["1"].contacts, {"silvia": "xyz@hbc.com"})
+
+    def test_update_account_spam_excludes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            secret = tmp / "client_secret.json"
+            signature = tmp / "sig.txt"
+            secret.write_text("{}", encoding="utf-8")
+            signature.write_text("Best", encoding="utf-8")
+            config_path = tmp / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "accounts": {
+                            "1": {
+                                "email": "user@example.com",
+                                "client_secret_file": str(secret),
+                                "signature_file": str(signature),
+                                "spam_excludes": ["old@example.com"],
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            update_account_spam_excludes(
+                config_path,
+                "1",
+                ["Trusted@Example.com", "", "old@example.com"],
+            )
+            config = load_config(config_path)
+            self.assertEqual(
+                config.accounts["1"].spam_excludes,
+                ["trusted@example.com", "old@example.com"],
+            )
 
 
 if __name__ == "__main__":

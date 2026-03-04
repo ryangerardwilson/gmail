@@ -17,6 +17,7 @@ class AccountConfig:
     client_secret_file: Path
     signature_file: Path
     spam_senders: list[str] = field(default_factory=list)
+    spam_excludes: list[str] = field(default_factory=list)
     contacts: dict[str, str] = field(default_factory=dict)
 
 
@@ -124,6 +125,7 @@ def _validate_account(preset: str, raw: Any, config_path: Path) -> AccountConfig
     client_secret = raw.get("client_secret_file")
     signature_file = raw.get("signature_file")
     spam_senders = normalize_spam_sender_list(raw.get("spam_senders"))
+    spam_excludes = normalize_sender_list(raw.get("spam_excludes"))
     contacts = normalize_contacts(raw.get("contacts"))
 
     if not isinstance(email, str) or not email.strip():
@@ -162,6 +164,7 @@ def _validate_account(preset: str, raw: Any, config_path: Path) -> AccountConfig
         client_secret_file=client_secret_path,
         signature_file=signature_path,
         spam_senders=spam_senders,
+        spam_excludes=spam_excludes,
         contacts=contacts,
     )
 
@@ -246,6 +249,33 @@ def update_account_sender_lists(
         spam_values = normalize_spam_sender_list(spam_list)
         account["spam_senders"] = spam_values
 
+    config_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+
+
+def update_account_spam_excludes(
+    config_path: Path,
+    preset: str,
+    spam_excludes: list[str],
+) -> None:
+    config_path = config_path.expanduser()
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"Invalid JSON in config {config_path}: {exc}") from exc
+
+    if not isinstance(raw, dict):
+        raise ConfigError(f"Invalid config at {config_path}: root must be an object")
+    accounts = raw.get("accounts")
+    if not isinstance(accounts, dict):
+        raise ConfigError(f"Invalid config at {config_path}: 'accounts' must be an object")
+
+    account = accounts.get(preset)
+    if not isinstance(account, dict):
+        raise ConfigError(
+            f"Invalid config at {config_path}: preset '{preset}' not found in accounts"
+        )
+
+    account["spam_excludes"] = normalize_sender_list(spam_excludes)
     config_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
 
 

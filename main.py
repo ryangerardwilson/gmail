@@ -16,6 +16,7 @@ from gmail_cli.config import (
     load_config,
     normalize_spam_sender_list,
     update_account_contacts,
+    update_account_spam_excludes,
     update_account_sender_lists,
 )
 from gmail_cli.errors import ConfigError, GmailCliError, UsageError
@@ -56,6 +57,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> si\n"
             "gmail <preset> sc\n"
             "gmail <preset> sa <spam_email1,spam_email2,...>\n"
+            "gmail <preset> se <email1,email2,...>\n"
             "gmail <preset> sa -ur\n"
             "gmail <preset> cn\n"
             "gmail <preset> cn -a <alias> <email>\n"
@@ -95,7 +97,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "preset", nargs="?", help="Account preset key from config.json, e.g. 1"
     )
-    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | o | mr | mur | d | ms | si | sc | sa | cn")
+    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | o | mr | mur | d | ms | si | sc | sa | se | cn")
     parser.add_argument("params", nargs=argparse.REMAINDER, help="Command parameters")
     return parser
 
@@ -112,6 +114,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail <preset> si",
                 "  gmail <preset> sc",
                 "  gmail <preset> sa <spam_email1,spam_email2,...>",
+                "  gmail <preset> se <email1,email2,...>",
                 "  gmail <preset> sa -ur",
                 "  gmail <preset> cn",
                 "  gmail <preset> cn -a <alias> <email>",
@@ -186,6 +189,9 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 si",
                 "  gmail 1 sc",
                 "  gmail 1 sa \"spam1@example.com,spam2@example.com\"",
+                "  gmail 1 sa \"@domain1.com,@domain2.com\"",
+                "  gmail 1 se \"trusted1@example.com,trusted2@example.com\"",
+                "  gmail 1 se \"@trusted-domain.com\"",
                 "  gmail 1 sa -ur",
                 "",
                 "  # Contacts",
@@ -818,7 +824,7 @@ def _handle_spam_identify(config, account, service) -> int:
         print("no potential spam senders found")
         return 0
 
-    print("potential spam senders (>5 unread, non-gmail):")
+    print("potential spam senders (>5 unread, excluding gmail + preset domain + spam_excludes):")
     for index, item in enumerate(candidates, start=1):
         print(f"  {index}. {item.sender} (unread={item.unread_count})")
     decision = make_identify_decision(candidates)
@@ -914,6 +920,18 @@ def _handle_spam_add(config, account, service, params: list[str]) -> int:
     merged = _merge_unique(account.spam_senders, new_items)
     update_account_sender_lists(config.path, {account.preset: merged})
     print(f"sa complete: added={len(new_items)} total_spam_senders={len(merged)}")
+    return 0
+
+
+def _handle_spam_exclude(config, account, params: list[str]) -> int:
+    if len(params) != 1:
+        raise UsageError("se requires exactly 1 param: <email1,email2,...>")
+    new_items = [item.strip().lower() for item in params[0].split(",") if item.strip()]
+    if not new_items:
+        raise UsageError("se requires at least one valid email in comma-separated input")
+    merged = sorted(set(account.spam_excludes + new_items))
+    update_account_spam_excludes(config.path, account.preset, merged)
+    print(f"se complete: added={len(new_items)} total_spam_excludes={len(merged)}")
     return 0
 
 
@@ -1136,7 +1154,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_usage_guide(show_examples=False, show_usage=True)
         return 0
     first = argv[0].lower()
-    preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "mr", "mur", "d", "ms", "cn"}
+    preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "se", "mr", "mur", "d", "ms", "cn"}
     if first in preset_required_commands:
         hint = " ".join(argv)
         raise UsageError(
@@ -1210,8 +1228,14 @@ def main(argv: list[str] | None = None) -> int:
     if command == "sa":
         return _handle_spam_add(config, account, service, args.params)
 
+    if command == "se":
+        return _handle_spam_exclude(config, account, args.params)
+
+    if command == "cn":
+        return _handle_contacts(config, account, args.params)
+
     raise UsageError(
-        f"Unknown command '{args.command}'. Use s, ls, r, o, mr, mur, d, ms, si, sc, sa, or cn."
+        f"Unknown command '{args.command}'. Use s, ls, r, o, mr, mur, d, ms, si, sc, sa, se, or cn."
     )
 
 

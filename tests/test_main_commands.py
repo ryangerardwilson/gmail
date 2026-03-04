@@ -406,6 +406,54 @@ class MainCommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         update_mock.assert_called_once()
 
+    def test_se_adds_spam_excludes(self) -> None:
+        with patch("main.load_config") as load_config_mock, patch(
+            "main.get_account"
+        ) as get_account_mock, patch("main.build_gmail_service"), patch(
+            "main._read_signature", return_value="sig"
+        ), patch("main.update_account_spam_excludes") as update_mock:
+            config = MagicMock()
+            config.path = Path("/tmp/config.json")
+            load_config_mock.return_value = config
+            get_account_mock.return_value = AccountConfig(
+                preset="1",
+                email="me@example.com",
+                client_secret_file=MagicMock(),
+                signature_file=MagicMock(),
+                spam_excludes=["old@example.com"],
+            )
+            code = main(["1", "se", "trusted@example.com,old@example.com"])
+        self.assertEqual(code, 0)
+        update_mock.assert_called_once_with(
+            Path("/tmp/config.json"),
+            "1",
+            ["old@example.com", "trusted@example.com"],
+        )
+
+    def test_se_adds_spam_exclude_domains(self) -> None:
+        with patch("main.load_config") as load_config_mock, patch(
+            "main.get_account"
+        ) as get_account_mock, patch("main.build_gmail_service"), patch(
+            "main._read_signature", return_value="sig"
+        ), patch("main.update_account_spam_excludes") as update_mock:
+            config = MagicMock()
+            config.path = Path("/tmp/config.json")
+            load_config_mock.return_value = config
+            get_account_mock.return_value = AccountConfig(
+                preset="1",
+                email="me@example.com",
+                client_secret_file=MagicMock(),
+                signature_file=MagicMock(),
+                spam_excludes=[],
+            )
+            code = main(["1", "se", "@blocked.com,@another.com"])
+        self.assertEqual(code, 0)
+        update_mock.assert_called_once_with(
+            Path("/tmp/config.json"),
+            "1",
+            ["@another.com", "@blocked.com"],
+        )
+
     def test_sa_unread_mode_collects_and_trashes(self) -> None:
         with patch("main.load_config") as load_config_mock, patch(
             "main.get_account"

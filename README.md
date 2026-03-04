@@ -50,6 +50,7 @@ Example:
       "client_secret_file": "/home/you/.config/gmail/client_secret.json",
       "signature_file": "/home/you/.config/gmail/signatures/account1.txt",
       "spam_senders": ["annoying@promo.biz"],
+      "spam_excludes": ["trusted@yourdomain.com"],
       "contacts": {
         "silvia": "xyz@hbc.com"
       }
@@ -82,6 +83,7 @@ gmail -u
 gmail <preset> si
 gmail <preset> sc
 gmail <preset> sa <spam_email1,spam_email2,...>
+gmail <preset> se <email1,email2,...>
 gmail <preset> sa -ur
 gmail <preset> cn
 gmail <preset> cn -a <alias> <email>
@@ -158,6 +160,9 @@ gmail 1 r -t -a "19ca756c06a7ebcd" "Thanks all."
 gmail 1 si
 gmail 1 sc
 gmail 1 sa "spam1@example.com,spam2@example.com"
+gmail 1 sa "@domain1.com,@domain2.com"
+gmail 1 se "trusted1@example.com,trusted2@example.com"
+gmail 1 se "@trusted-domain.com"
 gmail 1 sa -ur
 
 # Contacts
@@ -181,9 +186,10 @@ Reply flags:
 Spam flow commands:
 - `si` (spam identify): scans unread non-`@gmail.com` messages and counts sender occurrences, then lists senders with more than 5 unread mails and (on confirm) adds them to `spam_senders`.
 - `sc` (spam clean): trashes all messages (read + unread) from `spam_senders`.
-- `sa "<spam_email1,spam_email2,...>"`: manually add one or more senders to `spam_senders`.
+- `sa "<spam_email1,spam_email2,...>"`: manually add one or more senders to `spam_senders` (supports full emails and domain rules like `@domain.com`).
+- `se "<email1,email2,...>"`: add one or more senders to `spam_excludes` so `si` and `sc` skip them (supports full emails and domain rules like `@domain.com`).
 - `sa -ur`: adds senders of all unread messages to `spam_senders` and trashes those unread messages.
-- Safety rule: `@gmail.com` sender addresses are never added to `spam_senders`.
+- Safety rules for `si`: `@gmail.com` senders and senders from the preset's own domain are never added to `spam_senders`.
 
 Contacts commands:
 - `cn` (no args): list contacts for the preset.

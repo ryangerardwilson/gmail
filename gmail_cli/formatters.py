@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 from datetime import timedelta, timezone
+from html import unescape
+from html.parser import HTMLParser
 import os
 import re
 from email.utils import parseaddr
@@ -10,6 +12,101 @@ from typing import Any
 ANSI_RESET = "\033[0m"
 ANSI_GRAY = "\033[38;5;245m"
 ANSI_WHITE = "\033[97m"
+_BLOCK_TAGS = {
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "div",
+    "dl",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "li",
+    "main",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "tr",
+    "ul",
+}
+_BREAK_TAGS = {"br", "hr"}
+_SKIP_CONTENT_TAGS = {"style", "script", "noscript", "head", "title"}
+
+
+class _HtmlTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._anchor_stack: list[tuple[str | None, int]] = []
+        self._visible_char_count = 0
+        self._skip_depth = 0
+
+    def _append(self, text: str, count_visible: bool = True) -> None:
+        if not text:
+            return
+        self._parts.append(text)
+        if count_visible:
+            self._visible_char_count += len(re.sub(r"\s+", "", text))
+
+    def _append_newline(self) -> None:
+        if not self._parts:
+            return
+        if self._parts[-1].endswith("\n"):
+            return
+        self._parts.append("\n")
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        lowered = tag.lower()
+        if lowered in _SKIP_CONTENT_TAGS:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if lowered in _BLOCK_TAGS or lowered in _BREAK_TAGS:
+            self._append_newline()
+        if lowered == "a":
+            href = None
+            for key, value in attrs:
+                if key.lower() == "href" and isinstance(value, str) and value.strip():
+                    href = value.strip()
+                    break
+            self._anchor_stack.append((href, self._visible_char_count))
+
+    def handle_endtag(self, tag: str) -> None:
+        lowered = tag.lower()
+        if lowered in _SKIP_CONTENT_TAGS:
+            if self._skip_depth:
+                self._skip_depth -= 1
+            return
+        if self._skip_depth:
+            return
+        if lowered == "a" and self._anchor_stack:
+            href, visible_at_open = self._anchor_stack.pop()
+            if href and self._visible_char_count > visible_at_open:
+                self._append(f" ({href})", count_visible=False)
+        if lowered in _BLOCK_TAGS or lowered in _BREAK_TAGS:
+            self._append_newline()
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        self._append(data)
+
+    def as_text(self) -> str:
+        return "".join(self._parts)
 
 
 def _header_map(message: dict[str, Any]) -> dict[str, str]:
@@ -62,6 +159,45 @@ def _extract_any_body(payload: dict[str, Any]) -> str:
     return ""
 
 
+def _extract_mime_body(payload: dict[str, Any], mime_type: str) -> str | None:
+    payload_mime = payload.get("mimeType")
+    body_data = payload.get("body", {}).get("data")
+    if payload_mime == mime_type and isinstance(body_data, str):
+        return _decode_base64_url(body_data)
+
+    parts = payload.get("parts", [])
+    if isinstance(parts, list):
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            text = _extract_mime_body(part, mime_type)
+            if text:
+                return text
+    return None
+
+
+def _html_to_text_preserve_links(html_body: str) -> str:
+    if not html_body:
+        return ""
+
+    parser = _HtmlTextParser()
+    parser.feed(html_body)
+    parser.close()
+    text = unescape(parser.as_text()).replace("\xa0", " ")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    normalized_lines: list[str] = []
+    for line in text.split("\n"):
+        compact = re.sub(r"[ \t]+", " ", line).strip()
+        if compact:
+            normalized_lines.append(compact)
+            continue
+        if normalized_lines and normalized_lines[-1] != "":
+            normalized_lines.append("")
+
+    return "\n".join(normalized_lines).strip()
+
+
 def _timezone_from_offset(utc_offset: str) -> timezone:
     sign = 1 if utc_offset.startswith("+") else -1
     hours = int(utc_offset[1:3])
@@ -90,6 +226,7 @@ def _strip_quoted_history(body: str) -> str:
     output: list[str] = []
     quote_markers = (
         r"^On .+wrote:$",
+        r"^On .+,\s*at .+wrote:$",
         r"^From: .+",
         r"^-{2,}\s*Original Message\s*-{2,}$",
     )
@@ -154,7 +291,10 @@ def _trim_body(body: str, max_lines: int = 24, max_chars: int = 2000) -> str:
 
 
 def summarize_message(
-    message: dict[str, Any], trim_body: bool = True, utc_offset: str = "+05:30"
+    message: dict[str, Any],
+    trim_body: bool = True,
+    utc_offset: str = "+05:30",
+    strip_history: bool = True,
 ) -> dict[str, str]:
     headers = _header_map(message)
     from_raw = headers.get("from", "")
@@ -167,9 +307,18 @@ def summarize_message(
     payload = message.get("payload", {})
     if not isinstance(payload, dict):
         payload = {}
-    body = _extract_text_plain(payload) or _extract_any_body(payload) or ""
-    if trim_body:
+    plain_body = _extract_text_plain(payload)
+    if plain_body:
+        body = plain_body
+    else:
+        html_body = _extract_mime_body(payload, "text/html")
+        if html_body:
+            body = _html_to_text_preserve_links(html_body)
+        else:
+            body = _extract_any_body(payload) or ""
+    if strip_history:
         body = _strip_quoted_history(body)
+    if trim_body:
         body = _trim_body(body)
 
     return {
@@ -192,6 +341,12 @@ def _apply_color(block: str, is_from_me: bool) -> str:
         return block
     color = ANSI_GRAY if is_from_me else ANSI_WHITE
     return f"{color}{block}{ANSI_RESET}"
+
+
+def _apply_gray(block: str) -> str:
+    if os.getenv("NO_COLOR"):
+        return block
+    return f"{ANSI_GRAY}{block}{ANSI_RESET}"
 
 
 def render_messages_table(
@@ -223,8 +378,8 @@ def render_messages_table(
 def render_message_open(
     message: dict[str, Any], my_email: str, utc_offset: str = "+05:30"
 ) -> str:
-    row = summarize_message(message, trim_body=False, utc_offset=utc_offset)
-    lines = [
+    row = summarize_message(message, trim_body=False, utc_offset=utc_offset, strip_history=True)
+    header_lines = [
         f"message_id: {row['message_id']}",
         f"thread_id : {row['thread_id']}",
         f"date      : {row['date']}",
@@ -232,15 +387,15 @@ def render_message_open(
         f"to        : {row['to']}",
     ]
     if row["cc"].strip():
-        lines.append(f"cc        : {row['cc']}")
+        header_lines.append(f"cc        : {row['cc']}")
     if row["bcc"].strip():
-        lines.append(f"bcc       : {row['bcc']}")
-    lines.extend(
+        header_lines.append(f"bcc       : {row['bcc']}")
+    header_lines.extend(
         [
             f"subject   : {row['subject']}",
             "body:",
-            "",
-            row["body"],
         ]
     )
-    return _apply_color("\n".join(lines), row["from_email"] == my_email.strip().lower())
+    header_block = _apply_gray("\n".join(header_lines))
+    body_block = _apply_color(row["body"], row["from_email"] == my_email.strip().lower())
+    return "\n".join([header_block, "", body_block, ""])

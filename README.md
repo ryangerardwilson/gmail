@@ -94,8 +94,8 @@ gmail <preset> o -t <thread_id>
 gmail <preset> mr <message_id>
 gmail <preset> mra
 gmail <preset> mur <message_id>
-gmail <preset> str <message_id>
-gmail <preset> str -r <message_id>
+gmail <preset> mstr <message_id>
+gmail <preset> mustr <message_id>
 gmail <preset> d <message_id>
 gmail <preset> ms <message_id>
 gmail <preset> s -e
@@ -154,8 +154,8 @@ gmail 1 o -t "19ca756c06a7ebcd"
 gmail 1 mr "18f3abc..."
 gmail 1 mra
 gmail 1 mur "18f3abc..."
-gmail 1 str "18f3abc..."
-gmail 1 str -r "18f3abc..."
+gmail 1 mstr "18f3abc..."
+gmail 1 mustr "18f3abc..."
 gmail 1 d "18f3abc..."
 gmail 1 ms "18f3abc..."
 
@@ -225,13 +225,13 @@ Message utilities:
 - `mr <message_id>`: mark a single message as read.
 - `mra`: mark all unread messages as read.
 - `mur <message_id>`: mark a single message as unread.
-- `str <message_id>`: star a single message.
-- `str -r <message_id>`: remove star from a single message.
+- `mstr <message_id>`: star a single message.
+- `mustr <message_id>`: remove star from a single message.
 - `d <message_id>`: delete a single message.
 - `ms <message_id>`: mark sender as spam (adds sender to `spam_senders` subject to safety normalization) and trashes the message.
 - `ls -ur [limit]`: list unread messages only; if `limit` is omitted, uses config default list limit.
 - `ls -r [limit]`: list read received messages only (excludes sent); if `limit` is omitted, uses config default list limit.
-- `ls -str [limit]`: list starred messages only; if `limit` is omitted, uses config default list limit.
+- `ls -str [limit]`: list starred messages only; if `limit` is omitted, lists all starred messages.
 - `ls -ext <limit>`: list external-domain messages only (excludes your own sender address and your preset domain).
 - `ls -snt [limit|query]`: list/search sent messages. If `limit` is numeric, it limits sent results. Otherwise it is treated as a sent query.
 - `ls -o ...`: prints full body for each listed message and marks listed messages as read.

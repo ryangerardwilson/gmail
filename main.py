@@ -74,8 +74,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> mr <message_id>\n"
             "gmail <preset> mra\n"
             "gmail <preset> mur <message_id>\n"
-            "gmail <preset> str <message_id>\n"
-            "gmail <preset> str -r <message_id>\n"
+            "gmail <preset> mstr <message_id>\n"
+            "gmail <preset> mustr <message_id>\n"
             "gmail <preset> d <message_id>\n"
             "gmail <preset> ms <message_id>\n"
             "gmail <preset> s -e\n"
@@ -108,7 +108,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "preset", nargs="?", help="Account preset key from config.json, e.g. 1"
     )
-    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | o | mr | mra | mur | str | d | ms | si | sc | sa | se | cn")
+    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | o | mr | mra | mur | mstr | mustr | d | ms | si | sc | sa | se | cn")
     parser.add_argument("params", nargs=argparse.REMAINDER, help="Command parameters")
     return parser
 
@@ -136,8 +136,8 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail <preset> mr <message_id>",
                 "  gmail <preset> mra",
                 "  gmail <preset> mur <message_id>",
-                "  gmail <preset> str <message_id>",
-                "  gmail <preset> str -r <message_id>",
+                "  gmail <preset> mstr <message_id>",
+                "  gmail <preset> mustr <message_id>",
                 "  gmail <preset> d <message_id>",
                 "  gmail <preset> ms <message_id>",
                 "  gmail <preset> s -e",
@@ -194,8 +194,8 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 mr \"19caef2cd6494116\"",
                 "  gmail 1 mra",
                 "  gmail 1 mur \"19caef2cd6494116\"",
-                "  gmail 1 str \"19caef2cd6494116\"",
-                "  gmail 1 str -r \"19caef2cd6494116\"",
+                "  gmail 1 mstr \"19caef2cd6494116\"",
+                "  gmail 1 mustr \"19caef2cd6494116\"",
                 "  gmail 1 d \"19caef2cd6494116\"",
                 "  gmail 1 ms \"19caef2cd6494116\"",
                 "",
@@ -1149,20 +1149,21 @@ def _handle_mark_unread(service, params: list[str]) -> int:
     return 0
 
 
-def _handle_star(service, params: list[str]) -> int:
-    unstar = False
-    if params and params[0] == "-r":
-        unstar = True
-        params = params[1:]
+def _handle_mark_star(service, params: list[str]) -> int:
     if len(params) != 1:
-        raise UsageError("str requires: <message_id> or -r <message_id>")
+        raise UsageError("mstr requires exactly 1 param: <message_id>")
     message_id = params[0]
-    if unstar:
-        response = unstar_message(service, message_id)
-        print(f"unstarred message_id={response.get('id')} thread_id={response.get('threadId')}")
-        return 0
     response = star_message(service, message_id)
     print(f"starred message_id={response.get('id')} thread_id={response.get('threadId')}")
+    return 0
+
+
+def _handle_mark_unstar(service, params: list[str]) -> int:
+    if len(params) != 1:
+        raise UsageError("mustr requires exactly 1 param: <message_id>")
+    message_id = params[0]
+    response = unstar_message(service, message_id)
+    print(f"unstarred message_id={response.get('id')} thread_id={response.get('threadId')}")
     return 0
 
 
@@ -1307,7 +1308,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_usage_guide(show_examples=False, show_usage=True)
         return 0
     first = argv[0].lower()
-    preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "se", "mr", "mra", "mur", "str", "d", "ms", "cn"}
+    preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "se", "mr", "mra", "mur", "mstr", "mustr", "d", "ms", "cn"}
     if first in preset_required_commands:
         hint = " ".join(argv)
         raise UsageError(
@@ -1365,8 +1366,11 @@ def main(argv: list[str] | None = None) -> int:
     if command == "mur":
         return _handle_mark_unread(service, args.params)
 
-    if command == "str":
-        return _handle_star(service, args.params)
+    if command == "mstr":
+        return _handle_mark_star(service, args.params)
+
+    if command == "mustr":
+        return _handle_mark_unstar(service, args.params)
 
     if command == "d":
         return _handle_delete(service, args.params)
@@ -1394,7 +1398,7 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_contacts(config, account, args.params)
 
     raise UsageError(
-        f"Unknown command '{args.command}'. Use s, ls, r, o, mr, mra, mur, str, d, ms, si, sc, sa, se, or cn."
+        f"Unknown command '{args.command}'. Use s, ls, r, o, mr, mra, mur, mstr, mustr, d, ms, si, sc, sa, se, or cn."
     )
 
 

@@ -328,7 +328,7 @@ _gmail_completion() {
   local cmd="${COMP_WORDS[2]}"
 
   if [[ $cword -eq 2 ]]; then
-    COMPREPLY=( $(compgen -W "s ls r o mr mra mur str d ms si sc sa se cn" -- "$cur") )
+    COMPREPLY=( $(compgen -W "s ls r o mr mra mur mstr mustr d ms si sc sa se cn" -- "$cur") )
     return 0
   fi
 

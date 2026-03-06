@@ -9,8 +9,9 @@ from main import (
     _handle_mark_spammer,
     _handle_mark_read,
     _handle_mark_read_all,
+    _handle_mark_star,
+    _handle_mark_unstar,
     _handle_mark_unread,
-    _handle_star,
     _handle_open_message,
     _parse_editor_template,
     _handle_reply,
@@ -453,24 +454,29 @@ class MainCommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         mark_mock.assert_called_once_with(service, "m1")
 
-    def test_handle_star(self) -> None:
+    def test_handle_mark_star(self) -> None:
         service = MagicMock()
         with patch("main.star_message", return_value={"id": "m1", "threadId": "t1"}) as star_mock:
-            code = _handle_star(service, ["m1"])
+            code = _handle_mark_star(service, ["m1"])
         self.assertEqual(code, 0)
         star_mock.assert_called_once_with(service, "m1")
 
-    def test_handle_unstar(self) -> None:
+    def test_handle_mark_unstar(self) -> None:
         service = MagicMock()
         with patch("main.unstar_message", return_value={"id": "m1", "threadId": "t1"}) as unstar_mock:
-            code = _handle_star(service, ["-r", "m1"])
+            code = _handle_mark_unstar(service, ["m1"])
         self.assertEqual(code, 0)
         unstar_mock.assert_called_once_with(service, "m1")
 
-    def test_handle_star_bad_args(self) -> None:
+    def test_handle_mark_star_bad_args(self) -> None:
         service = MagicMock()
         with self.assertRaises(UsageError):
-            _handle_star(service, [])
+            _handle_mark_star(service, [])
+
+    def test_handle_mark_unstar_bad_args(self) -> None:
+        service = MagicMock()
+        with self.assertRaises(UsageError):
+            _handle_mark_unstar(service, [])
 
     def test_handle_mark_read_all(self) -> None:
         service = MagicMock()

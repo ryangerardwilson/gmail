@@ -9,7 +9,7 @@ from .errors import UsageError
 @dataclass(frozen=True)
 class ParsedQuery:
     gmail_query: str
-    max_results: int
+    max_results: int | None
 
 
 def parse_declarative_query(query: str, default_limit: int) -> ParsedQuery:
@@ -18,7 +18,7 @@ def parse_declarative_query(query: str, default_limit: int) -> ParsedQuery:
 
     tokens = shlex.split(query)
     terms: list[str] = []
-    max_results = default_limit
+    max_results: int | None = None
 
     i = 0
     while i < len(tokens):

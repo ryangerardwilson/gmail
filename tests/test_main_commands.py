@@ -10,6 +10,7 @@ from main import (
     _handle_mark_read,
     _handle_mark_read_all,
     _handle_mark_unread,
+    _handle_star,
     _handle_open_message,
     _parse_editor_template,
     _handle_reply,
@@ -249,12 +250,12 @@ class MainCommandTests(unittest.TestCase):
 
     def test_handle_list_unread_default_limit(self) -> None:
         service = MagicMock()
-        with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
+        with patch("main.list_all_messages", return_value=[] ) as list_messages_mock, patch(
             "main.render_messages_table", return_value="table"
         ):
             code = _handle_list(service, ["-ur"], default_limit=10, my_email="me@example.com")
         self.assertEqual(code, 0)
-        list_messages_mock.assert_called_once_with(service, "is:unread", 10)
+        list_messages_mock.assert_called_once_with(service, "is:unread")
 
     def test_handle_list_unread_custom_limit(self) -> None:
         service = MagicMock()
@@ -271,12 +272,12 @@ class MainCommandTests(unittest.TestCase):
 
     def test_handle_list_read_default_limit(self) -> None:
         service = MagicMock()
-        with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
+        with patch("main.list_all_messages", return_value=[] ) as list_messages_mock, patch(
             "main.render_messages_table", return_value="table"
         ):
             code = _handle_list(service, ["-r"], default_limit=10, my_email="me@example.com")
         self.assertEqual(code, 0)
-        list_messages_mock.assert_called_once_with(service, "is:read -from:me@example.com", 10)
+        list_messages_mock.assert_called_once_with(service, "is:read -from:me@example.com")
 
     def test_handle_list_read_custom_limit(self) -> None:
         service = MagicMock()
@@ -285,6 +286,23 @@ class MainCommandTests(unittest.TestCase):
         ):
             _handle_list(service, ["-r", "1"], default_limit=10, my_email="me@example.com")
         list_messages_mock.assert_called_once_with(service, "is:read -from:me@example.com", 1)
+
+    def test_handle_list_starred_default_limit(self) -> None:
+        service = MagicMock()
+        with patch("main.list_all_messages", return_value=[] ) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            code = _handle_list(service, ["-str"], default_limit=10, my_email="me@example.com")
+        self.assertEqual(code, 0)
+        list_messages_mock.assert_called_once_with(service, "is:starred")
+
+    def test_handle_list_starred_custom_limit(self) -> None:
+        service = MagicMock()
+        with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            _handle_list(service, ["-str", "3"], default_limit=10, my_email="me@example.com")
+        list_messages_mock.assert_called_once_with(service, "is:starred", 3)
 
     def test_handle_list_external_limit(self) -> None:
         service = MagicMock()
@@ -299,12 +317,12 @@ class MainCommandTests(unittest.TestCase):
 
     def test_handle_list_sent_default_limit(self) -> None:
         service = MagicMock()
-        with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
+        with patch("main.list_all_messages", return_value=[] ) as list_messages_mock, patch(
             "main.render_messages_table", return_value="table"
         ):
             code = _handle_list(service, ["-snt"], default_limit=10, my_email="me@example.com")
         self.assertEqual(code, 0)
-        list_messages_mock.assert_called_once_with(service, "in:sent", 10)
+        list_messages_mock.assert_called_once_with(service, "in:sent")
 
     def test_handle_list_sent_custom_limit(self) -> None:
         service = MagicMock()
@@ -434,6 +452,25 @@ class MainCommandTests(unittest.TestCase):
             code = _handle_mark_unread(service, ["m1"])
         self.assertEqual(code, 0)
         mark_mock.assert_called_once_with(service, "m1")
+
+    def test_handle_star(self) -> None:
+        service = MagicMock()
+        with patch("main.star_message", return_value={"id": "m1", "threadId": "t1"}) as star_mock:
+            code = _handle_star(service, ["m1"])
+        self.assertEqual(code, 0)
+        star_mock.assert_called_once_with(service, "m1")
+
+    def test_handle_unstar(self) -> None:
+        service = MagicMock()
+        with patch("main.unstar_message", return_value={"id": "m1", "threadId": "t1"}) as unstar_mock:
+            code = _handle_star(service, ["-r", "m1"])
+        self.assertEqual(code, 0)
+        unstar_mock.assert_called_once_with(service, "m1")
+
+    def test_handle_star_bad_args(self) -> None:
+        service = MagicMock()
+        with self.assertRaises(UsageError):
+            _handle_star(service, [])
 
     def test_handle_mark_read_all(self) -> None:
         service = MagicMock()
@@ -774,3 +811,13 @@ class MainCommandTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+    def test_handle_list_external_default_unbounded(self) -> None:
+        service = MagicMock()
+        with patch("main.list_all_messages", return_value=[] ) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            code = _handle_list(service, ["-ext"], default_limit=10, my_email="me@example.com")
+        self.assertEqual(code, 0)
+        list_messages_mock.assert_called_once_with(
+            service, "-from:me@example.com -from:*@example.com"
+        )

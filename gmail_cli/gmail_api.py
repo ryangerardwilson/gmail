@@ -836,6 +836,38 @@ def mark_message_unread(service, message_id: str) -> dict[str, Any]:
         raise ApiError(f"Failed to mark message '{message_id}' as unread: {exc}") from exc
 
 
+def star_message(service, message_id: str) -> dict[str, Any]:
+    try:
+        return (
+            service.users()
+            .messages()
+            .modify(
+                userId="me",
+                id=message_id,
+                body={"addLabelIds": ["STARRED"]},
+            )
+            .execute()
+        )
+    except Exception as exc:  # pragma: no cover
+        raise ApiError(f"Failed to star message '{message_id}': {exc}") from exc
+
+
+def unstar_message(service, message_id: str) -> dict[str, Any]:
+    try:
+        return (
+            service.users()
+            .messages()
+            .modify(
+                userId="me",
+                id=message_id,
+                body={"removeLabelIds": ["STARRED"]},
+            )
+            .execute()
+        )
+    except Exception as exc:  # pragma: no cover
+        raise ApiError(f"Failed to unstar message '{message_id}': {exc}") from exc
+
+
 def delete_message(service, message_id: str) -> None:
     try:
         service.users().messages().trash(userId="me", id=message_id).execute()

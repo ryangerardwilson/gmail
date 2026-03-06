@@ -31,11 +31,14 @@ from gmail_cli.gmail_api import (
     get_thread_messages,
     hydrate_message_text_from_raw,
     hydrate_message_text_bodies,
+    list_all_messages,
     list_messages,
     list_messages_page,
     list_message_ids,
     mark_message_read,
+    star_message,
     mark_message_unread,
+    unstar_message,
     reply_to_message,
     reply_to_thread,
     send_email,
@@ -71,6 +74,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> mr <message_id>\n"
             "gmail <preset> mra\n"
             "gmail <preset> mur <message_id>\n"
+            "gmail <preset> str <message_id>\n"
+            "gmail <preset> str -r <message_id>\n"
             "gmail <preset> d <message_id>\n"
             "gmail <preset> ms <message_id>\n"
             "gmail <preset> s -e\n"
@@ -78,6 +83,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> ls [-o] <query>\n"
             "gmail <preset> ls [-o] -ur [limit]\n"
             "gmail <preset> ls [-o] -r [limit]\n"
+            "gmail <preset> ls [-o] -str [limit]\n"
             "gmail <preset> ls [-o] -ext <limit>\n"
             "gmail <preset> ls [-o] -snt [limit|query]\n"
             "gmail <preset> ls -ura [limit]\n"
@@ -102,7 +108,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "preset", nargs="?", help="Account preset key from config.json, e.g. 1"
     )
-    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | o | mr | mra | mur | d | ms | si | sc | sa | se | cn")
+    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | o | mr | mra | mur | str | d | ms | si | sc | sa | se | cn")
     parser.add_argument("params", nargs=argparse.REMAINDER, help="Command parameters")
     return parser
 
@@ -130,6 +136,8 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail <preset> mr <message_id>",
                 "  gmail <preset> mra",
                 "  gmail <preset> mur <message_id>",
+                "  gmail <preset> str <message_id>",
+                "  gmail <preset> str -r <message_id>",
                 "  gmail <preset> d <message_id>",
                 "  gmail <preset> ms <message_id>",
                 "  gmail <preset> s -e",
@@ -137,6 +145,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail <preset> ls [-o] <query>",
                 "  gmail <preset> ls [-o] -ur [limit]",
                 "  gmail <preset> ls [-o] -r [limit]",
+                "  gmail <preset> ls [-o] -str [limit]",
                 "  gmail <preset> ls [-o] -ext <limit>",
                 "  gmail <preset> ls [-o] -snt [limit|query]",
                 "  gmail <preset> ls -ura [limit]",
@@ -165,6 +174,8 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 ls -ur 1",
                 "  gmail 1 ls -r",
                 "  gmail 1 ls -r 1",
+                "  gmail 1 ls -str",
+                "  gmail 1 ls -str 5",
                 "  gmail 1 ls -ext 10",
                 "  gmail 1 ls -snt 10",
                 "  gmail 1 ls -snt \"silvia\"",
@@ -183,6 +194,8 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 mr \"19caef2cd6494116\"",
                 "  gmail 1 mra",
                 "  gmail 1 mur \"19caef2cd6494116\"",
+                "  gmail 1 str \"19caef2cd6494116\"",
+                "  gmail 1 str -r \"19caef2cd6494116\"",
                 "  gmail 1 d \"19caef2cd6494116\"",
                 "  gmail 1 ms \"19caef2cd6494116\"",
                 "",
@@ -448,10 +461,12 @@ def _handle_send(
     return 0
 
 
-def _parse_optional_limit(flag: str, params: list[str], default_limit: int) -> int:
+def _parse_optional_limit(flag: str, params: list[str]) -> int | None:
     if len(params) > 2:
         raise UsageError(f"{flag} accepts at most 1 optional param: [limit]")
-    max_results = default_limit
+    if len(params) == 1:
+        return None
+    max_results: int | None = None
     if len(params) == 2:
         try:
             max_results = int(params[1])
@@ -460,6 +475,12 @@ def _parse_optional_limit(flag: str, params: list[str], default_limit: int) -> i
         if max_results <= 0:
             raise UsageError(f"{flag} limit must be > 0")
     return max_results
+
+
+def _list_with_optional_limit(service, gmail_query: str, max_results: int | None) -> list[dict]:
+    if max_results is None:
+        return list_all_messages(service, gmail_query)
+    return list_messages(service, gmail_query, max_results)
 
 
 def _is_gmail_sender(sender_email: str) -> bool:
@@ -564,6 +585,17 @@ def _print_list_results(
     print(f"ls_opened messages={len(messages)} marked_read={marked_read}")
 
 
+def _sort_messages_oldest_first(messages: list[dict]) -> list[dict]:
+    def _internal_date_key(message: dict) -> int:
+        raw = message.get("internalDate", "0")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 0
+
+    return sorted(messages, key=_internal_date_key)
+
+
 def _handle_list(
     service,
     params: list[str],
@@ -580,37 +612,50 @@ def _handle_list(
         raise UsageError("ls -o is not supported with -ura or -ra")
 
     if filtered_params[0] == "-ur":
-        max_results = _parse_optional_limit("ls -ur", filtered_params, default_limit)
-        messages = list_messages(service, "is:unread", max_results)
+        max_results = _parse_optional_limit("ls -ur", filtered_params)
+        messages = _list_with_optional_limit(service, "is:unread", max_results)
+        messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
     if filtered_params[0] == "-r":
-        max_results = _parse_optional_limit("ls -r", filtered_params, default_limit)
-        messages = list_messages(service, f"is:read -from:{my_email}", max_results)
+        max_results = _parse_optional_limit("ls -r", filtered_params)
+        messages = _list_with_optional_limit(service, f"is:read -from:{my_email}", max_results)
+        messages = _sort_messages_oldest_first(messages)
+        _print_list_results(service, messages, my_email, utc_offset, open_mode)
+        return 0
+
+    if filtered_params[0] == "-str":
+        max_results = _parse_optional_limit("ls -str", filtered_params)
+        messages = _list_with_optional_limit(service, "is:starred", max_results)
+        messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
     if filtered_params[0] == "-ext":
-        if len(filtered_params) != 2:
-            raise UsageError("ls -ext requires exactly 1 param: <limit>")
-        try:
-            max_results = int(filtered_params[1])
-        except ValueError as exc:
-            raise UsageError("ls -ext limit must be a positive integer") from exc
-        if max_results <= 0:
-            raise UsageError("ls -ext limit must be > 0")
+        if len(filtered_params) > 2:
+            raise UsageError("ls -ext accepts at most 1 optional param: [limit]")
+        max_results: int | None = None
+        if len(filtered_params) == 2:
+            try:
+                max_results = int(filtered_params[1])
+            except ValueError as exc:
+                raise UsageError("ls -ext limit must be a positive integer") from exc
+            if max_results <= 0:
+                raise UsageError("ls -ext limit must be > 0")
         domain = my_email.split("@", 1)[1].strip().lower() if "@" in my_email else ""
         ext_query = f"-from:{my_email}"
         if domain:
             ext_query += f" -from:*@{domain}"
-        messages = list_messages(service, ext_query, max_results)
+        messages = _list_with_optional_limit(service, ext_query, max_results)
+        messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
     if filtered_params[0] == "-snt":
         if len(filtered_params) == 1:
-            messages = list_messages(service, "in:sent", default_limit)
+            messages = list_all_messages(service, "in:sent")
+            messages = _sort_messages_oldest_first(messages)
             _print_list_results(service, messages, my_email, utc_offset, open_mode)
             return 0
         if len(filtered_params) == 2:
@@ -620,6 +665,7 @@ def _handle_list(
                 max_results = -1
             if max_results > 0:
                 messages = list_messages(service, "in:sent", max_results)
+                messages = _sort_messages_oldest_first(messages)
                 _print_list_results(service, messages, my_email, utc_offset, open_mode)
                 return 0
             if max_results == 0:
@@ -627,7 +673,8 @@ def _handle_list(
 
         sent_query = "in:sent " + " ".join(filtered_params[1:])
         parsed = parse_declarative_query(sent_query, default_limit)
-        messages = list_messages(service, parsed.gmail_query, parsed.max_results)
+        messages = _list_with_optional_limit(service, parsed.gmail_query, parsed.max_results)
+        messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
@@ -650,12 +697,14 @@ def _handle_list(
             raise UsageError("ls -t requires exactly 1 param: <thread_id>")
         thread_id = filtered_params[1]
         messages = get_thread_messages(service, thread_id)
+        messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
     query = " ".join(filtered_params)
     parsed = parse_declarative_query(query, default_limit)
-    messages = list_messages(service, parsed.gmail_query, parsed.max_results)
+    messages = _list_with_optional_limit(service, parsed.gmail_query, parsed.max_results)
+    messages = _sort_messages_oldest_first(messages)
     _print_list_results(service, messages, my_email, utc_offset, open_mode)
     return 0
 
@@ -691,6 +740,7 @@ def _run_audit_mode(
             messages, next_page = list_messages_page(
                 service, gmail_query, max_results=10, page_token=page_token
             )
+            messages = _sort_messages_oldest_first(messages)
             if not messages:
                 if audited == 0:
                     print(f"No {mode_label} messages found.")
@@ -709,8 +759,11 @@ def _run_audit_mode(
                 break
             page_token = next_page
     else:
-        max_results = _parse_optional_limit(f"ls -{mode_flag}", params, default_limit)
+        max_results = _parse_optional_limit(f"ls -{mode_flag}", params)
+        if max_results is None:
+            max_results = default_limit
         messages = list_messages(service, gmail_query, max_results)
+        messages = _sort_messages_oldest_first(messages)
         if not messages:
             print(f"No {mode_label} messages found.")
             return 0
@@ -1096,6 +1149,23 @@ def _handle_mark_unread(service, params: list[str]) -> int:
     return 0
 
 
+def _handle_star(service, params: list[str]) -> int:
+    unstar = False
+    if params and params[0] == "-r":
+        unstar = True
+        params = params[1:]
+    if len(params) != 1:
+        raise UsageError("str requires: <message_id> or -r <message_id>")
+    message_id = params[0]
+    if unstar:
+        response = unstar_message(service, message_id)
+        print(f"unstarred message_id={response.get('id')} thread_id={response.get('threadId')}")
+        return 0
+    response = star_message(service, message_id)
+    print(f"starred message_id={response.get('id')} thread_id={response.get('threadId')}")
+    return 0
+
+
 def _handle_delete(service, params: list[str]) -> int:
     if len(params) != 1:
         raise UsageError("d requires exactly 1 param: <message_id>")
@@ -1237,7 +1307,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_usage_guide(show_examples=False, show_usage=True)
         return 0
     first = argv[0].lower()
-    preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "se", "mr", "mra", "mur", "d", "ms", "cn"}
+    preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "se", "mr", "mra", "mur", "str", "d", "ms", "cn"}
     if first in preset_required_commands:
         hint = " ".join(argv)
         raise UsageError(
@@ -1295,6 +1365,9 @@ def main(argv: list[str] | None = None) -> int:
     if command == "mur":
         return _handle_mark_unread(service, args.params)
 
+    if command == "str":
+        return _handle_star(service, args.params)
+
     if command == "d":
         return _handle_delete(service, args.params)
 
@@ -1321,7 +1394,7 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_contacts(config, account, args.params)
 
     raise UsageError(
-        f"Unknown command '{args.command}'. Use s, ls, r, o, mr, mra, mur, d, ms, si, sc, sa, se, or cn."
+        f"Unknown command '{args.command}'. Use s, ls, r, o, mr, mra, mur, str, d, ms, si, sc, sa, se, or cn."
     )
 
 

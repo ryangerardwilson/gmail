@@ -29,6 +29,8 @@ from gmail_cli.gmail_api import (
     download_message_attachments,
     get_message,
     get_thread_messages,
+    hydrate_message_text_from_raw,
+    hydrate_message_text_bodies,
     list_messages,
     list_messages_page,
     list_message_ids,
@@ -541,12 +543,14 @@ def _print_list_results(
     utc_offset: str,
     open_mode: bool,
 ) -> None:
-    print(render_messages_table(messages, my_email, utc_offset=utc_offset))
-    if not open_mode or not messages:
+    if not open_mode:
+        print(render_messages_table(messages, my_email, utc_offset=utc_offset))
+        return
+    if not messages:
+        print("No messages found.")
         return
 
     message_ids: list[str] = []
-    print("")
     for index, message in enumerate(messages, start=1):
         message_id = str(message.get("id", "")).strip()
         if message_id:
@@ -1039,6 +1043,8 @@ def _handle_open_message(
 
     if not use_thread:
         message = get_message(service, target_id, format_type="full")
+        message = hydrate_message_text_bodies(service, message)
+        message = hydrate_message_text_from_raw(service, message)
         downloaded = download_message_attachments(service, message, Path.cwd())
         response = mark_message_read(service, target_id)
         print(render_message_open(message, my_email, utc_offset=utc_offset))
@@ -1059,6 +1065,8 @@ def _handle_open_message(
     all_downloaded: list[Path] = []
     message_ids: list[str] = []
     for idx, message in enumerate(messages, start=1):
+        message = hydrate_message_text_bodies(service, message)
+        message = hydrate_message_text_from_raw(service, message)
         message_id = str(message.get("id", "")).strip()
         if message_id:
             message_ids.append(message_id)

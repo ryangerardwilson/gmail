@@ -329,7 +329,7 @@ class MainCommandTests(unittest.TestCase):
         messages = [{"id": "m1"}, {"id": "m2"}]
         with patch("main.list_messages", return_value=messages) as list_messages_mock, patch(
             "main.render_messages_table", return_value="table"
-        ), patch("main.render_message_open", return_value="opened") as render_open_mock, patch(
+        ) as render_table_mock, patch("main.render_message_open", return_value="opened") as render_open_mock, patch(
             "main.batch_mark_messages_read", return_value=2
         ) as mark_batch_mock:
             code = _handle_list(
@@ -340,6 +340,7 @@ class MainCommandTests(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         list_messages_mock.assert_called_once_with(service, "is:unread", 2)
+        render_table_mock.assert_not_called()
         self.assertEqual(render_open_mock.call_count, 2)
         mark_batch_mock.assert_called_once_with(service, ["m1", "m2"])
 
@@ -351,7 +352,7 @@ class MainCommandTests(unittest.TestCase):
             return_value=MagicMock(gmail_query="from:xyz", max_results=1),
         ) as parse_mock, patch("main.list_messages", return_value=messages), patch(
             "main.render_messages_table", return_value="table"
-        ), patch("main.render_message_open", return_value="opened"), patch(
+        ) as render_table_mock, patch("main.render_message_open", return_value="opened"), patch(
             "main.batch_mark_messages_read", return_value=1
         ) as mark_batch_mock:
             code = _handle_list(
@@ -362,6 +363,7 @@ class MainCommandTests(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         parse_mock.assert_called_once_with("from xyz limit 1", 10)
+        render_table_mock.assert_not_called()
         mark_batch_mock.assert_called_once_with(service, ["m1"])
 
     def test_handle_list_open_mode_rejects_audit_flags(self) -> None:
@@ -386,12 +388,20 @@ class MainCommandTests(unittest.TestCase):
     def test_handle_open_message(self) -> None:
         service = MagicMock()
         with patch("main.get_message", return_value={"id": "m1", "threadId": "t1"}), patch(
+            "main.hydrate_message_text_bodies",
+            side_effect=lambda _service, message: message,
+        ) as hydrate_mock, patch(
+            "main.hydrate_message_text_from_raw",
+            side_effect=lambda _service, message: message,
+        ) as hydrate_raw_mock, patch(
             "main.download_message_attachments", return_value=[]
         ) as dl_mock, patch(
             "main.mark_message_read", return_value={"id": "m1", "threadId": "t1"}
         ) as mark_mock, patch("main.render_message_open", return_value="opened"):
             code = _handle_open_message(service, ["m1"], "me@example.com")
         self.assertEqual(code, 0)
+        hydrate_mock.assert_called_once()
+        hydrate_raw_mock.assert_called_once()
         dl_mock.assert_called_once()
         mark_mock.assert_called_once_with(service, "m1")
 
@@ -399,6 +409,12 @@ class MainCommandTests(unittest.TestCase):
         service = MagicMock()
         messages = [{"id": "m1", "threadId": "t1"}, {"id": "m2", "threadId": "t1"}]
         with patch("main.get_thread_messages", return_value=messages), patch(
+            "main.hydrate_message_text_bodies",
+            side_effect=lambda _service, message: message,
+        ) as hydrate_mock, patch(
+            "main.hydrate_message_text_from_raw",
+            side_effect=lambda _service, message: message,
+        ) as hydrate_raw_mock, patch(
             "main.download_message_attachments", side_effect=[[Path("/tmp/a")], []]
         ) as dl_mock, patch(
             "main.batch_mark_messages_read", return_value=2
@@ -407,6 +423,8 @@ class MainCommandTests(unittest.TestCase):
         ):
             code = _handle_open_message(service, ["-t", "t1"], "me@example.com")
         self.assertEqual(code, 0)
+        self.assertEqual(hydrate_mock.call_count, 2)
+        self.assertEqual(hydrate_raw_mock.call_count, 2)
         self.assertEqual(dl_mock.call_count, 2)
         mark_batch_mock.assert_called_once_with(service, ["m1", "m2"])
 

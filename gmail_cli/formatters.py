@@ -5,6 +5,7 @@ from datetime import timedelta, timezone
 from html import unescape
 from html.parser import HTMLParser
 import os
+import quopri
 import re
 from email.utils import parseaddr
 from email.utils import parsedate_to_datetime
@@ -44,6 +45,38 @@ _BLOCK_TAGS = {
 }
 _BREAK_TAGS = {"br", "hr"}
 _SKIP_CONTENT_TAGS = {"style", "script", "noscript", "head", "title"}
+_COMMON_FOOTER_NOISE_PATTERNS = (
+    "unsubscribe",
+    "privacy policy",
+    "terms of service",
+    "manage your email preferences",
+)
+_LINKEDIN_FOOTER_NOISE_PATTERNS = (
+    "unsubscribe",
+    "you are receiving",
+    "learn why we included this",
+    "help:",
+    "linkedin corporation",
+    "notification emails",
+)
+_COMMON_FOOTER_CUT_MARKERS = (
+    "unsubscribe:",
+    "privacy policy",
+    "terms of service",
+    "manage your email preferences",
+)
+_LINKEDIN_FOOTER_CUT_MARKERS = (
+    "this email was intended for",
+    "you are receiving linkedin notification emails",
+    "unsubscribe:",
+    "help:",
+    "linkedin corporation",
+)
+_LINKEDIN_PROMO_CUT_MARKERS = (
+    "top jobs looking for your skills",
+    "see more jobs",
+    "get the new linkedin desktop app",
+)
 
 
 class _HtmlTextParser(HTMLParser):
@@ -53,6 +86,7 @@ class _HtmlTextParser(HTMLParser):
         self._anchor_stack: list[tuple[str | None, int]] = []
         self._visible_char_count = 0
         self._skip_depth = 0
+        self._hidden_tag_stack: list[str] = []
 
     def _append(self, text: str, count_visible: bool = True) -> None:
         if not text:
@@ -73,6 +107,12 @@ class _HtmlTextParser(HTMLParser):
         if lowered in _SKIP_CONTENT_TAGS:
             self._skip_depth += 1
             return
+        if self._hidden_tag_stack:
+            return
+        attrs_map = {str(key).lower(): (value or "") for key, value in attrs}
+        if _is_hidden_html_node(lowered, attrs_map):
+            self._hidden_tag_stack.append(lowered)
+            return
         if self._skip_depth:
             return
         if lowered in _BLOCK_TAGS or lowered in _BREAK_TAGS:
@@ -91,6 +131,10 @@ class _HtmlTextParser(HTMLParser):
             if self._skip_depth:
                 self._skip_depth -= 1
             return
+        if self._hidden_tag_stack:
+            if lowered == self._hidden_tag_stack[-1]:
+                self._hidden_tag_stack.pop()
+            return
         if self._skip_depth:
             return
         if lowered == "a" and self._anchor_stack:
@@ -101,6 +145,8 @@ class _HtmlTextParser(HTMLParser):
             self._append_newline()
 
     def handle_data(self, data: str) -> None:
+        if self._hidden_tag_stack:
+            return
         if self._skip_depth:
             return
         self._append(data)
@@ -120,17 +166,43 @@ def _header_map(message: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+def _payload_header_map(payload: dict[str, Any]) -> dict[str, str]:
+    headers = payload.get("headers", [])
+    result: dict[str, str] = {}
+    if not isinstance(headers, list):
+        return result
+    for item in headers:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        value = item.get("value")
+        if isinstance(name, str) and isinstance(value, str):
+            result[name.lower()] = value
+    return result
+
+
 def _decode_base64_url(data: str) -> str:
     pad = "=" * ((4 - len(data) % 4) % 4)
     decoded = base64.urlsafe_b64decode(data + pad)
     return decoded.decode("utf-8", errors="replace")
 
 
+def _decode_payload_body_data(payload: dict[str, Any], data: str) -> str:
+    pad = "=" * ((4 - len(data) % 4) % 4)
+    raw = base64.urlsafe_b64decode(data + pad)
+
+    encoding = _payload_header_map(payload).get("content-transfer-encoding", "").strip().lower()
+    if encoding == "quoted-printable":
+        raw = quopri.decodestring(raw)
+
+    return raw.decode("utf-8", errors="replace")
+
+
 def _extract_text_plain(payload: dict[str, Any]) -> str | None:
     mime_type = payload.get("mimeType")
     body_data = payload.get("body", {}).get("data")
     if mime_type == "text/plain" and isinstance(body_data, str):
-        return _decode_base64_url(body_data)
+        return _decode_payload_body_data(payload, body_data)
 
     parts = payload.get("parts", [])
     if isinstance(parts, list):
@@ -146,7 +218,7 @@ def _extract_text_plain(payload: dict[str, Any]) -> str | None:
 def _extract_any_body(payload: dict[str, Any]) -> str:
     body_data = payload.get("body", {}).get("data")
     if isinstance(body_data, str):
-        return _decode_base64_url(body_data)
+        return _decode_payload_body_data(payload, body_data)
 
     parts = payload.get("parts", [])
     if isinstance(parts, list):
@@ -163,7 +235,7 @@ def _extract_mime_body(payload: dict[str, Any], mime_type: str) -> str | None:
     payload_mime = payload.get("mimeType")
     body_data = payload.get("body", {}).get("data")
     if payload_mime == mime_type and isinstance(body_data, str):
-        return _decode_base64_url(body_data)
+        return _decode_payload_body_data(payload, body_data)
 
     parts = payload.get("parts", [])
     if isinstance(parts, list):
@@ -196,6 +268,166 @@ def _html_to_text_preserve_links(html_body: str) -> str:
             normalized_lines.append("")
 
     return "\n".join(normalized_lines).strip()
+
+
+def _is_hidden_html_node(tag: str, attrs_map: dict[str, str]) -> bool:
+    if attrs_map.get("hidden", "") != "":
+        return True
+    if attrs_map.get("aria-hidden", "").strip().lower() == "true":
+        return True
+    if attrs_map.get("data-email-preheader", "").strip().lower() in {"true", "1", "yes"}:
+        return True
+    if attrs_map.get("role", "").strip().lower() == "presentation" and tag == "img":
+        return True
+
+    style = attrs_map.get("style", "").lower()
+    hidden_style_tokens = (
+        "display:none",
+        "display: none",
+        "visibility:hidden",
+        "visibility: hidden",
+        "opacity:0",
+        "opacity: 0",
+        "max-height:0",
+        "max-height: 0",
+        "height:0",
+        "height: 0",
+        "mso-hide:all",
+        "mso-hide: all",
+    )
+    if any(token in style for token in hidden_style_tokens):
+        return True
+
+    class_value = attrs_map.get("class", "").lower()
+    class_tokens = set(re.split(r"\s+", class_value.strip())) if class_value.strip() else set()
+    if class_tokens.intersection({"hidden", "invisible", "opacity-0", "text-transparent"}):
+        return True
+    return False
+
+
+def _count_footer_noise_hits(text: str, linkedin_mode: bool = False) -> int:
+    lowered = text.lower()
+    patterns = _COMMON_FOOTER_NOISE_PATTERNS
+    if linkedin_mode:
+        patterns = patterns + _LINKEDIN_FOOTER_NOISE_PATTERNS
+    return sum(1 for pattern in patterns if pattern in lowered)
+
+
+def _body_quality_score(text: str, linkedin_mode: bool = False) -> float:
+    if not text:
+        return -100.0
+
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    lowered = normalized.lower()
+    non_empty_lines = [line.strip() for line in normalized.split("\n") if line.strip()]
+    word_count = len(re.findall(r"[a-zA-Z]{2,}", normalized))
+    sentence_count = len(re.findall(r"[.!?](?:\s|$)", normalized))
+    url_count = len(re.findall(r"https?://|www\.", lowered))
+    long_token_count = len(re.findall(r"\S{70,}", normalized))
+    footer_hits = _count_footer_noise_hits(normalized, linkedin_mode=linkedin_mode)
+
+    score = 0.0
+    score += min(word_count, 220) * 0.22
+    score += min(sentence_count, 12) * 1.8
+    score -= url_count * 2.8
+    score -= long_token_count * 0.75
+    score -= footer_hits * 7.0
+
+    if word_count > 0 and len(non_empty_lines) > 0:
+        avg_words_per_line = word_count / len(non_empty_lines)
+        if avg_words_per_line < 2.0:
+            score -= 4.0
+
+    if "this email was intended for" in lowered:
+        score -= 10.0
+
+    return score
+
+
+def _strip_footer_sections(text: str, linkedin_mode: bool = False) -> str:
+    if not text:
+        return ""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+    cutoff = len(lines)
+    footer_markers = _COMMON_FOOTER_CUT_MARKERS
+    promo_markers: tuple[str, ...] = ()
+    if linkedin_mode:
+        footer_markers = footer_markers + _LINKEDIN_FOOTER_CUT_MARKERS
+        promo_markers = _LINKEDIN_PROMO_CUT_MARKERS
+
+    for i, line in enumerate(lines):
+        lowered = line.strip().lower()
+        if not lowered:
+            continue
+        if any(marker in lowered for marker in footer_markers):
+            cutoff = i
+            break
+    if promo_markers:
+        for i, line in enumerate(lines):
+            lowered = line.strip().lower()
+            if not lowered:
+                continue
+            if any(marker in lowered for marker in promo_markers):
+                cutoff = min(cutoff, i)
+                break
+
+    cleaned = "\n".join(lines[:cutoff]).strip()
+    return cleaned if cleaned else text.strip()
+
+
+def _prefer_html_over_plain(plain_body: str, html_as_text: str, linkedin_mode: bool = False) -> bool:
+    plain_lower = plain_body.lower()
+    if linkedin_mode:
+        html_word_count = len(re.findall(r"[a-zA-Z]{2,}", html_as_text))
+        plain_footer_heavy = (
+            "this email was intended for" in plain_lower
+            or "you are receiving linkedin notification emails" in plain_lower
+            or _count_footer_noise_hits(plain_body, linkedin_mode=True) >= 2
+        )
+        html_has_substantive_sentence = bool(
+            re.search(r"\b(thank you for your interest|unfortunately, we will not)\b", html_as_text.lower())
+        )
+        if plain_footer_heavy and html_word_count >= 35 and html_has_substantive_sentence:
+            return True
+
+    plain_score = _body_quality_score(plain_body, linkedin_mode=linkedin_mode)
+    html_score = _body_quality_score(html_as_text, linkedin_mode=linkedin_mode)
+    footer_heavy_plain = _count_footer_noise_hits(plain_body, linkedin_mode=linkedin_mode) >= 2
+    threshold = 2.0 if (linkedin_mode and footer_heavy_plain) else 8.0
+    return html_score >= plain_score + threshold
+
+
+def _should_prefer_snippet(body: str, snippet: str, linkedin_mode: bool = False) -> bool:
+    if not body or not snippet:
+        return False
+
+    body_hits = _count_footer_noise_hits(body, linkedin_mode=linkedin_mode)
+    min_hits = 2 if linkedin_mode else 3
+    if body_hits < min_hits:
+        return False
+
+    snippet_clean = re.sub(r"\s+", " ", snippet).strip()
+    if len(snippet_clean) < 30:
+        return False
+
+    snippet_words = len(re.findall(r"[a-zA-Z]{2,}", snippet_clean))
+    if snippet_words < 7:
+        return False
+    if len(re.findall(r"[\u034f\u00ad\u200b\u200c\u200d]", snippet_clean)) >= 3:
+        return False
+    if len(re.findall(r"https?://|www\.", snippet_clean.lower())) > 1:
+        return False
+
+    if snippet_clean.lower() in body.lower():
+        return False
+
+    return True
+
+
+def _is_linkedin_sender(from_email: str) -> bool:
+    domain = from_email.strip().lower().split("@")[-1] if from_email else ""
+    return domain.endswith("linkedin.com")
 
 
 def _timezone_from_offset(utc_offset: str) -> timezone:
@@ -303,23 +535,36 @@ def summarize_message(
         display_from = f"{from_name} <{from_email}>"
     else:
         display_from = from_email or from_raw
+    linkedin_mode = _is_linkedin_sender(from_email)
 
     payload = message.get("payload", {})
     if not isinstance(payload, dict):
         payload = {}
-    plain_body = _extract_text_plain(payload)
-    if plain_body:
-        body = plain_body
+    raw_plain = message.get("_raw_plain_body")
+    raw_html = message.get("_raw_html_body")
+    plain_body_raw = raw_plain if isinstance(raw_plain, str) and raw_plain.strip() else _extract_text_plain(payload)
+    html_body = raw_html if isinstance(raw_html, str) and raw_html.strip() else _extract_mime_body(payload, "text/html")
+    html_as_text_raw = _html_to_text_preserve_links(html_body) if html_body else ""
+    if plain_body_raw and html_as_text_raw:
+        selected = (
+            html_as_text_raw
+            if _prefer_html_over_plain(plain_body_raw, html_as_text_raw, linkedin_mode=linkedin_mode)
+            else plain_body_raw
+        )
+    elif plain_body_raw:
+        selected = plain_body_raw
+    elif html_as_text_raw:
+        selected = html_as_text_raw
     else:
-        html_body = _extract_mime_body(payload, "text/html")
-        if html_body:
-            body = _html_to_text_preserve_links(html_body)
-        else:
-            body = _extract_any_body(payload) or ""
+        selected = _extract_any_body(payload) or ""
+    body = _strip_footer_sections(selected, linkedin_mode=linkedin_mode) if selected else ""
     if strip_history:
         body = _strip_quoted_history(body)
     if trim_body:
         body = _trim_body(body)
+    snippet = str(message.get("snippet", "")).strip()
+    if _should_prefer_snippet(body, snippet, linkedin_mode=linkedin_mode):
+        body = snippet
 
     return {
         "message_id": str(message.get("id", "")),
@@ -331,8 +576,8 @@ def summarize_message(
         "bcc": headers.get("bcc", ""),
         "subject": headers.get("subject", ""),
         "date": _to_local_date(headers.get("date", ""), utc_offset),
-        "body": body.strip() or str(message.get("snippet", "")).strip(),
-        "snippet": str(message.get("snippet", "")).strip(),
+        "body": body.strip() or snippet,
+        "snippet": snippet,
     }
 
 

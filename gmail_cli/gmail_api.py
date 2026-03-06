@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import base64
 from collections import defaultdict
+from email import message_from_bytes
 import io
 import mimetypes
 from email.message import EmailMessage
+from email.message import Message
 from email.utils import getaddresses
 from email.utils import parseaddr
 from email.utils import parsedate_to_datetime
@@ -13,6 +15,7 @@ from typing import Any
 import zipfile
 
 from .errors import ApiError
+_TEXT_MIME_TYPES = {"text/plain", "text/html"}
 
 
 def _encode_message(message: EmailMessage) -> str:
@@ -263,6 +266,104 @@ def get_message(
         return service.users().messages().get(**kwargs).execute()
     except Exception as exc:  # pragma: no cover
         raise ApiError(f"Failed to fetch message '{message_id}': {exc}") from exc
+
+
+def _hydrate_text_parts_payload(service, message_id: str, payload: dict[str, Any]) -> None:
+    mime_type = str(payload.get("mimeType", "")).strip().lower()
+    body = payload.get("body", {})
+    if not isinstance(body, dict):
+        body = {}
+        payload["body"] = body
+
+    if mime_type in _TEXT_MIME_TYPES:
+        has_data = isinstance(body.get("data"), str)
+        attachment_id = body.get("attachmentId")
+        if not has_data and isinstance(attachment_id, str):
+            try:
+                response = (
+                    service.users()
+                    .messages()
+                    .attachments()
+                    .get(userId="me", messageId=message_id, id=attachment_id)
+                    .execute()
+                )
+            except Exception:
+                response = {}
+            raw_data = response.get("data")
+            if isinstance(raw_data, str):
+                body["data"] = raw_data
+
+    parts = payload.get("parts", [])
+    if not isinstance(parts, list):
+        return
+    for part in parts:
+        if isinstance(part, dict):
+            _hydrate_text_parts_payload(service, message_id, part)
+
+
+def hydrate_message_text_bodies(service, message: dict[str, Any]) -> dict[str, Any]:
+    message_id = str(message.get("id", "")).strip()
+    payload = message.get("payload", {})
+    if not message_id or not isinstance(payload, dict):
+        return message
+    _hydrate_text_parts_payload(service, message_id, payload)
+    return message
+
+
+def _extract_best_text_parts_from_raw(raw_bytes: bytes) -> tuple[str | None, str | None]:
+    msg: Message = message_from_bytes(raw_bytes)
+    plain_candidates: list[str] = []
+    html_candidates: list[str] = []
+
+    for part in msg.walk():
+        content_type = part.get_content_type().lower()
+        if content_type not in {"text/plain", "text/html"}:
+            continue
+        disposition = (part.get_content_disposition() or "").lower()
+        if disposition == "attachment":
+            continue
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            continue
+        charset = part.get_content_charset() or "utf-8"
+        try:
+            text = payload.decode(charset, errors="replace")
+        except LookupError:
+            text = payload.decode("utf-8", errors="replace")
+        if not text.strip():
+            continue
+        if content_type == "text/plain":
+            plain_candidates.append(text)
+        else:
+            html_candidates.append(text)
+
+    plain = max(plain_candidates, key=len) if plain_candidates else None
+    html = max(html_candidates, key=len) if html_candidates else None
+    return plain, html
+
+
+def hydrate_message_text_from_raw(service, message: dict[str, Any]) -> dict[str, Any]:
+    message_id = str(message.get("id", "")).strip()
+    if not message_id:
+        return message
+    try:
+        response = service.users().messages().get(userId="me", id=message_id, format="raw").execute()
+    except Exception:
+        return message
+
+    raw = response.get("raw")
+    if not isinstance(raw, str) or not raw:
+        return message
+    try:
+        raw_bytes = _decode_base64_url(raw)
+    except Exception:
+        return message
+    plain, html = _extract_best_text_parts_from_raw(raw_bytes)
+    if plain:
+        message["_raw_plain_body"] = plain
+    if html:
+        message["_raw_html_body"] = html
+    return message
 
 
 def _attachment_parts(payload: dict[str, Any]) -> list[tuple[str, str | None, str | None]]:

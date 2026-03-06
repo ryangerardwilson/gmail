@@ -844,7 +844,7 @@ def star_message(service, message_id: str) -> dict[str, Any]:
             .modify(
                 userId="me",
                 id=message_id,
-                body={"addLabelIds": ["STARRED"]},
+                body={"addLabelIds": ["STARRED"], "removeLabelIds": ["UNREAD"]},
             )
             .execute()
         )

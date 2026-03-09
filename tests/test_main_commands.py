@@ -1,4 +1,5 @@
 import unittest
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
@@ -65,6 +66,16 @@ class MainCommandTests(unittest.TestCase):
         write_mock.assert_called_once()
         systemctl_mock.assert_any_call("daemon-reload")
         systemctl_mock.assert_any_call("enable", "--now", "gmail.timer")
+
+    def test_help_is_human_friendly(self) -> None:
+        with patch("sys.stdout", new=StringIO()) as stdout:
+            code = main(["-h"])
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn("Gmail CLI", output)
+        self.assertIn("send a new email, optionally with cc, bcc, attachments, or editor mode", output)
+        self.assertIn("gmail 1 ls -ur", output)
+        self.assertNotIn("usage:", output)
 
     def test_build_runtime_command_uses_launcher_only_when_frozen(self) -> None:
         with patch("sys.executable", "/tmp/gmail"), patch("sys.frozen", True, create=True):

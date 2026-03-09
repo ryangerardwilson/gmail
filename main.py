@@ -1302,10 +1302,10 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     if argv and argv[0] == "-h":
-        _print_usage_guide(show_examples=True, show_usage=False)
+        _print_usage_guide(show_examples=True, show_usage=True)
         return 0
     if not argv:
-        _print_usage_guide(show_examples=False, show_usage=True)
+        _print_usage_guide(show_examples=True, show_usage=True)
         return 0
     first = argv[0].lower()
     preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "se", "mr", "mra", "mur", "mstr", "mustr", "d", "ms", "cn"}

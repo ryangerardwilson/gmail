@@ -1050,6 +1050,14 @@ def _write_timer_units() -> None:
     timer_path = systemd_dir / f"{_gmail_unit_name()}.timer"
     entrypoint = Path(__file__).resolve()
     python_bin = Path(sys.executable).resolve()
+    run_command = " ".join(
+        [
+            shlex.quote(str(python_bin)),
+            shlex.quote(str(entrypoint)),
+            "sc",
+        ]
+    )
+    notify_command = "notify-send 'gmail' 'Hourly spam clean finished successfully'"
     service_body = "\n".join(
         [
             "[Unit]",
@@ -1058,7 +1066,7 @@ def _write_timer_units() -> None:
             "[Service]",
             "Type=oneshot",
             f"WorkingDirectory={entrypoint.parent}",
-            f"ExecStart={python_bin} {entrypoint} sc",
+            f"ExecStart=/usr/bin/env bash -lc {shlex.quote(f'{run_command} && {notify_command}')}",
             "",
         ]
     )

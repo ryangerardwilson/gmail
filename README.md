@@ -35,6 +35,11 @@ Required permissions/scopes used by this CLI:
 curl -fsSL https://raw.githubusercontent.com/ryangerardwilson/gmail/main/install.sh | bash
 ```
 
+## External dependencies
+
+- `notify-send` for timer success notifications
+- a notification daemon such as Mako to display those notifications
+
 ## Config
 
 Default path is `~/.config/gmail/config.json` (or `$XDG_CONFIG_HOME/gmail/config.json`).

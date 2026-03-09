@@ -58,12 +58,16 @@ jobs:
               PYBIN="/opt/py/python/bin/python3"
               export LD_LIBRARY_PATH="/opt/py/python/lib:${LD_LIBRARY_PATH:-}"
               "$PYBIN" -m pip install -U pip
-              "$PYBIN" -m pip install --only-binary=:all: pyinstaller
               "$PYBIN" -m pip install -r requirements.txt
+              # Force pure-Python charset-normalizer so PyInstaller does not miss mypyc helper
+              # modules from the compiled wheel in the final bundle.
+              "$PYBIN" -m pip install --force-reinstall --no-binary=charset-normalizer charset-normalizer
+              "$PYBIN" -m pip install --only-binary=:all: pyinstaller
 
               sed -i -E "s/^__version__ = \".*\"/__version__ = \"${VERSION}\"/" main.py
 
               "$PYBIN" -m PyInstaller --clean --onedir --name gmail \
+                --collect-all charset_normalizer \
                 main.py
 
               tar -C dist -czf gmail-linux-x64.tar.gz gmail

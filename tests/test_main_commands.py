@@ -171,6 +171,39 @@ class MainCommandTests(unittest.TestCase):
         self.assertIn("hint: if this id is a thread id, use: r -e -t <thread_id>", printed)
         self.assertIn("Reply body", printed)
 
+    def test_handle_reply_appends_signature(self) -> None:
+        service = MagicMock()
+        with patch(
+            "main.reply_to_message",
+            return_value={"id": "m1", "threadId": "t1"},
+        ) as reply_mock:
+            code = _handle_reply(
+                service,
+                "me@example.com",
+                ["msg1", "Reply body"],
+                "sig",
+                {},
+            )
+        self.assertEqual(code, 0)
+        args, kwargs = reply_mock.call_args
+        self.assertEqual(args[3], "Reply body")
+        self.assertEqual(kwargs["signature"], "sig")
+
+    def test_handle_reply_editor_mode_avoids_duplicate_signature(self) -> None:
+        service = MagicMock()
+        with patch(
+            "main._open_editor_template",
+            return_value=("", "", "Reply body\n\n-- \nsig", [], [], []),
+        ), patch(
+            "main.reply_to_message",
+            return_value={"id": "m1", "threadId": "t1"},
+        ) as reply_mock:
+            code = _handle_reply(service, "me@example.com", ["-e", "msg1"], "sig", {})
+        self.assertEqual(code, 0)
+        args, kwargs = reply_mock.call_args
+        self.assertEqual(args[3], "Reply body\n\n-- \nsig")
+        self.assertEqual(kwargs["signature"], "sig")
+
     def test_handle_send_resolves_contact_alias(self) -> None:
         service = MagicMock()
         with patch("main.send_email", return_value={"id": "m1", "threadId": "t1"}) as send_mock:

@@ -234,7 +234,7 @@ class ReplyApiTests(unittest.TestCase):
         }
         messages_api.send.return_value.execute.return_value = {"id": "new-id", "threadId": "thr-2"}
 
-        reply_to_thread(service, "me@example.com", "thr-2", "Follow-up", reply_all=True)
+        reply_to_thread(service, "me@example.com", "thr-2", "Follow-up", signature="sig", reply_all=True)
 
         payload = messages_api.send.call_args.kwargs["body"]
         mime = _decode_raw(payload["raw"])
@@ -242,6 +242,29 @@ class ReplyApiTests(unittest.TestCase):
         self.assertEqual(mime["To"], "peer@example.com")
         self.assertEqual(mime["Cc"], "cc@example.com")
         self.assertEqual(mime["In-Reply-To"], "<peer-msg@example.com>")
+        self.assertIn("-- \nsig", mime.get_content())
+
+    def test_reply_to_message_appends_signature(self) -> None:
+        service = MagicMock()
+        messages_api = service.users.return_value.messages.return_value
+        messages_api.get.return_value.execute.return_value = {
+            "threadId": "thr-1",
+            "payload": {
+                "headers": [
+                    {"name": "From", "value": "Sender <sender@example.com>"},
+                    {"name": "Subject", "value": "Topic"},
+                    {"name": "Message-ID", "value": "<msgid-1@example.com>"},
+                ]
+            },
+        }
+        messages_api.send.return_value.execute.return_value = {"id": "new-id", "threadId": "thr-1"}
+
+        reply_to_message(service, "me@example.com", "msg-1", "Reply body", signature="sig")
+
+        payload = messages_api.send.call_args.kwargs["body"]
+        mime = _decode_raw(payload["raw"])
+        self.assertIn("Reply body", mime.get_content())
+        self.assertIn("-- \nsig", mime.get_content())
 
 
 if __name__ == "__main__":

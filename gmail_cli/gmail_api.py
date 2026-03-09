@@ -179,6 +179,16 @@ def _build_reply_payload(
     }
 
 
+def _append_signature_once(body: str, signature: str | None) -> str:
+    body_clean = body.rstrip()
+    if not signature:
+        return body_clean
+    sig_block = f"-- \n{signature.strip()}"
+    if body_clean.endswith(sig_block):
+        return body_clean
+    return f"{body_clean}\n\n{sig_block}"
+
+
 def send_email(
     service,
     from_email: str,
@@ -585,6 +595,7 @@ def reply_to_message(
     from_email: str,
     message_id: str,
     body: str,
+    signature: str | None = None,
     reply_all: bool = False,
     cc_emails: list[str] | None = None,
     bcc_emails: list[str] | None = None,
@@ -611,7 +622,7 @@ def reply_to_message(
     payload = _build_reply_payload(
         original,
         from_email,
-        body,
+        _append_signature_once(body, signature),
         source_label=f"message '{message_id}'",
         reply_all=reply_all,
         cc_emails=cc_emails,
@@ -630,6 +641,7 @@ def reply_to_thread(
     from_email: str,
     thread_id: str,
     body: str,
+    signature: str | None = None,
     reply_all: bool = False,
     cc_emails: list[str] | None = None,
     bcc_emails: list[str] | None = None,
@@ -671,7 +683,7 @@ def reply_to_thread(
     payload = _build_reply_payload(
         anchor,
         from_email,
-        body,
+        _append_signature_once(body, signature),
         source_label=f"thread '{thread_id}'",
         reply_all=reply_all,
         cc_emails=cc_emails,

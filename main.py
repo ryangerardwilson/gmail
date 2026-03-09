@@ -886,14 +886,14 @@ def _handle_reply(
         attachment_paths = attachment_from_editor + attachment_paths
     cc_emails = _resolve_recipient_list(cc_emails, contacts)
     bcc_emails = _resolve_recipient_list(bcc_emails, contacts)
-    signed_body = _append_signature(body, signature)
     try:
         if use_thread:
             response = reply_to_thread(
                 service,
                 from_email,
                 target_id,
-                signed_body,
+                body,
+                signature=signature,
                 reply_all=reply_all,
                 cc_emails=cc_emails,
                 bcc_emails=bcc_emails,
@@ -904,7 +904,8 @@ def _handle_reply(
                 service,
                 from_email,
                 target_id,
-                signed_body,
+                body,
+                signature=signature,
                 reply_all=reply_all,
                 cc_emails=cc_emails,
                 bcc_emails=bcc_emails,

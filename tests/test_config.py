@@ -9,9 +9,10 @@ from gmail_cli.config import (
     data_home,
     load_config,
     normalize_contacts,
+    normalize_account_email,
     normalize_sender_list,
     resolve_config_path,
-    token_file_for_account_key,
+    token_file_for_email,
     update_account_contacts,
     update_account_spam_excludes,
     update_account_sender_lists,
@@ -36,11 +37,14 @@ class ConfigTests(unittest.TestCase):
         with patch.dict(os.environ, {"XDG_DATA_HOME": "/tmp/data"}, clear=True):
             self.assertEqual(data_home(), Path("/tmp/data/gmail"))
 
-    def test_token_file_for_account_key_uses_xdg_data_home(self) -> None:
+    def test_normalize_account_email(self) -> None:
+        self.assertEqual(normalize_account_email(" User@Example.com "), "user@example.com")
+
+    def test_token_file_for_email_uses_xdg_data_home(self) -> None:
         with patch.dict(os.environ, {"XDG_DATA_HOME": "/tmp/data"}, clear=True):
             self.assertEqual(
-                token_file_for_account_key("abc123"),
-                Path("/tmp/data/gmail/tokens/abc123.json"),
+                token_file_for_email("User@Example.com"),
+                Path("/tmp/data/gmail/tokens/user@example.com.json"),
             )
 
     def test_load_config_validates_required_fields(self) -> None:

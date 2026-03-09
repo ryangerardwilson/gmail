@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,7 +16,6 @@ class AccountConfig:
     email: str
     client_secret_file: Path
     signature_file: Path
-    account_key: str = ""
     spam_senders: list[str] = field(default_factory=list)
     spam_excludes: list[str] = field(default_factory=list)
     contacts: dict[str, str] = field(default_factory=dict)
@@ -108,15 +106,12 @@ def data_home() -> Path:
     return Path("~/.local/share/gmail").expanduser()
 
 
-def generate_account_key(client_secret_file: str | Path, account_identity: str) -> str:
-    resolved_path = str(Path(client_secret_file).expanduser().resolve())
-    normalized_identity = str(account_identity).strip().lower()
-    digest = hashlib.sha256(f"{resolved_path}|{normalized_identity}".encode("utf-8")).hexdigest()
-    return digest[:16]
+def normalize_account_email(email: str) -> str:
+    return email.strip().lower()
 
 
-def token_file_for_account_key(account_key: str) -> Path:
-    return data_home() / "tokens" / f"{account_key}.json"
+def token_file_for_email(email: str) -> Path:
+    return data_home() / "tokens" / f"{normalize_account_email(email)}.json"
 
 
 def token_file_for_preset(preset: str) -> Path:
@@ -144,7 +139,6 @@ def _validate_account(preset: str, raw: Any, config_path: Path) -> AccountConfig
     email = raw.get("email")
     client_secret = raw.get("client_secret_file")
     signature_file = raw.get("signature_file")
-    account_key = raw.get("account_key")
     spam_senders = normalize_spam_sender_list(raw.get("spam_senders"))
     spam_excludes = normalize_sender_list(raw.get("spam_excludes"))
     contacts = normalize_contacts(raw.get("contacts"))
@@ -178,16 +172,10 @@ def _validate_account(preset: str, raw: Any, config_path: Path) -> AccountConfig
             f"{config_path}: signature_file not found for preset '{preset}': "
             f"{signature_path}"
         )
-    if isinstance(account_key, str) and account_key.strip():
-        resolved_account_key = account_key.strip()
-    else:
-        resolved_account_key = generate_account_key(client_secret_path, email.strip().lower())
-
     return AccountConfig(
         preset=preset,
-        email=email.strip(),
+        email=normalize_account_email(email),
         client_secret_file=client_secret_path,
-        account_key=resolved_account_key,
         signature_file=signature_path,
         spam_senders=spam_senders,
         spam_excludes=spam_excludes,
@@ -370,19 +358,12 @@ def upsert_authenticated_account(
     normalized_secret = client_secret_file.expanduser().resolve()
     normalized_email = email.strip().lower()
     normalized_signature = signature_file.expanduser().resolve()
-    account_key = generate_account_key(normalized_secret, normalized_email)
-
     target_preset: str | None = None
     for preset, account in accounts.items():
         if not isinstance(account, dict):
             continue
-        existing_key = str(account.get("account_key", "")).strip()
-        if not existing_key:
-            existing_email = str(account.get("email", "")).strip().lower()
-            existing_secret = str(account.get("client_secret_file", "")).strip()
-            if existing_email and existing_secret:
-                existing_key = generate_account_key(existing_secret, existing_email)
-        if existing_key == account_key:
+        existing_email = normalize_account_email(str(account.get("email", "")))
+        if existing_email and existing_email == normalized_email:
             target_preset = str(preset)
             break
 
@@ -394,7 +375,6 @@ def upsert_authenticated_account(
         account_payload = {}
     account_payload["email"] = normalized_email
     account_payload["client_secret_file"] = str(normalized_secret)
-    account_payload["account_key"] = account_key
     account_payload["signature_file"] = str(normalized_signature)
     account_payload["spam_senders"] = normalize_spam_sender_list(account_payload.get("spam_senders"))
     account_payload["spam_excludes"] = normalize_sender_list(account_payload.get("spam_excludes"))

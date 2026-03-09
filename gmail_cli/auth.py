@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import AccountConfig, ensure_token_dirs, generate_account_key, token_file_for_account_key
+from .config import AccountConfig, ensure_token_dirs, normalize_account_email, token_file_for_email
 from .errors import ApiError
 
 try:
@@ -27,7 +27,6 @@ SCOPES = [
 @dataclass(frozen=True)
 class AuthorizedGmailAccount:
     email: str
-    account_key: str
     creds: Credentials
 
 
@@ -77,14 +76,13 @@ def authorize_account(client_secret_file: Path) -> AuthorizedGmailAccount:
     try:
         service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         profile = service.users().getProfile(userId="me").execute()
-        email = str(profile.get("emailAddress", "")).strip().lower()
+        email = normalize_account_email(str(profile.get("emailAddress", "")))
     except Exception as exc:
         raise ApiError(f"Failed to fetch Gmail profile after OAuth: {exc}") from exc
     if not email:
         raise ApiError("Gmail profile lookup returned no email address")
-    account_key = generate_account_key(client_secret_file, email)
-    _write_token(token_file_for_account_key(account_key), creds)
-    return AuthorizedGmailAccount(email=email, account_key=account_key, creds=creds)
+    _write_token(token_file_for_email(email), creds)
+    return AuthorizedGmailAccount(email=email, creds=creds)
 
 def get_credentials(account: AccountConfig) -> Credentials:
     if Request is None or InstalledAppFlow is None:
@@ -93,11 +91,7 @@ def get_credentials(account: AccountConfig) -> Credentials:
         )
 
     ensure_token_dirs()
-    if not account.account_key:
-        raise ApiError(
-            f"preset {account.preset} is missing account_key; re-run `gmail auth <client_secret_path>`"
-        )
-    token_path = token_file_for_account_key(account.account_key)
+    token_path = token_file_for_email(account.email)
     creds = _load_credentials(token_path)
 
     if creds and creds.valid:

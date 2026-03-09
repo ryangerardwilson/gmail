@@ -320,12 +320,16 @@ _gmail_completion() {
   cword="$COMP_CWORD"
 
   if [[ $cword -eq 1 ]]; then
-    COMPREPLY=( $(compgen -W "-v -u $(_gmail_complete_values presets '')" -- "$cur") )
+    COMPREPLY=( $(compgen -W "-v -u auth sc ti td st $(_gmail_complete_values presets '')" -- "$cur") )
     return 0
   fi
 
   local preset="${COMP_WORDS[1]}"
   local cmd="${COMP_WORDS[2]}"
+
+  if [[ "$preset" == "auth" ]]; then
+    return 0
+  fi
 
   if [[ $cword -eq 2 ]]; then
     COMPREPLY=( $(compgen -W "s ls r o mr mra mur mstr mustr d ms si sc sa se cn" -- "$cur") )

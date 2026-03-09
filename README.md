@@ -73,6 +73,7 @@ Notes:
 - Normal app runs only use account-keyed tokens. Legacy preset-number token names are not read implicitly.
 - `signature_file` is required for each account and is appended automatically to all outgoing send/reply bodies.
 - `defaults.timezone_offset` controls displayed message timestamps in output (`±HH:MM`, for example `+05:30` or `-07:00`).
+- `sc`, `ti`, `td`, and `st` are global maintenance commands that act across all configured presets.
 
 ## Usage
 
@@ -81,6 +82,10 @@ gmail -h
 gmail -v
 gmail -u
 gmail auth <client_secret_path>
+gmail sc
+gmail ti
+gmail td
+gmail st
 gmail <preset> si
 gmail <preset> sc
 gmail <preset> sa <spam_email1,spam_email2,...>
@@ -172,6 +177,7 @@ gmail 1 r -t "19ca756c06a7ebcd" "Following up on this thread."
 gmail 1 r -t -a "19ca756c06a7ebcd" "Thanks all."
 
 # Spam flow
+gmail sc
 gmail 1 si
 gmail 1 sc
 gmail 1 sa "spam1@example.com,spam2@example.com"
@@ -179,6 +185,7 @@ gmail 1 sa "@domain1.com,@domain2.com"
 gmail 1 se "trusted1@example.com,trusted2@example.com"
 gmail 1 se "@trusted-domain.com"
 gmail 1 sa -ur
+gmail ti
 
 # Contacts
 gmail 1 cn
@@ -201,10 +208,20 @@ Reply flags:
 Spam flow commands:
 - `si` (spam identify): scans unread non-`@gmail.com` messages and counts sender occurrences, then lists senders with more than 5 unread mails and (on confirm) adds them to `spam_senders`.
 - `sc` (spam clean): trashes all messages (read + unread) from `spam_senders`.
+- top-level `sc`: runs spam clean across all configured presets.
 - `sa "<spam_email1,spam_email2,...>"`: manually add one or more senders to `spam_senders` (supports full emails and domain rules like `@domain.com`).
 - `se "<email1,email2,...>"`: add one or more senders to `spam_excludes` so `si` and `sc` skip them (supports full emails and domain rules like `@domain.com`).
 - `sa -ur`: adds senders of all unread messages to `spam_senders` and trashes those unread messages.
 - Safety rules for `si`: `@gmail.com` senders and senders from the preset's own domain are never added to `spam_senders`.
+
+## Timer
+
+`ti` writes one global user service to `~/.config/systemd/user/` and enables an hourly timer that runs `gmail sc` across all presets.
+
+```bash
+gmail ti
+systemctl --user list-timers gmail.timer
+```
 
 Contacts commands:
 - `cn` (no args): list contacts for the preset.

@@ -11,6 +11,7 @@ using account presets defined in XDG-compliant config.
 - Gmail-only support for v1.
 - Multi-account via preset keys (`1`, `2`, ...), scalable to more.
 - `auth <client_secret_path>` must be the standard way to add or refresh a Google account preset.
+- Global maintenance commands may exist when their semantics are cross-preset.
 - Config default path must be XDG-compliant:
   - `$GMAIL_CLI_CONFIG` (if set) overrides all.
   - else `$XDG_CONFIG_HOME/gmail/config.json` (if `XDG_CONFIG_HOME` is set),
@@ -24,6 +25,13 @@ using account presets defined in XDG-compliant config.
   - `python main.py <preset> s <to> <subject> <body>`
   - `python main.py <preset> ls <query>`
   - `python main.py <preset> r <message_id> <body>`
+- Spam cleanup should support both:
+  - `python main.py <preset> sc`
+  - `python main.py sc`
+- Timer controls should be global:
+  - `python main.py ti`
+  - `python main.py td`
+  - `python main.py st`
 - Query example to support: `"from maanas limit 1"`.
 
 ## Architecture expectations
@@ -104,6 +112,8 @@ Adjust structure if needed, but preserve separation of concerns.
 ## Definition of done
 - CLI supports send/list/reply for configured Gmail presets.
 - Works with at least two configured accounts.
+- Global `sc` runs spam cleanup across all configured presets.
+- `ti` installs one hourly user timer that runs the same global spam cleanup command.
 - Config path resolution is XDG-compliant.
 - Query example `from maanas limit 1` works.
 - Tests for core parsing/config logic pass locally.

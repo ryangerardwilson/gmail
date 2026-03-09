@@ -56,6 +56,7 @@ __version__ = "0.1.0"
 _TRAILING_OPTIONS = {"-cc", "-bcc", "-atch"}
 ANSI_RESET = "\033[0m"
 ANSI_GRAY = "\033[38;5;245m"
+GLOBAL_COMMANDS = {"sc", "ti", "td", "st"}
 
 
 def _muted_text(text: str) -> str:
@@ -71,6 +72,10 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail -v\n"
             "gmail -u\n"
             "gmail auth <client_secret_path>\n"
+            "gmail sc\n"
+            "gmail ti\n"
+            "gmail td\n"
+            "gmail st\n"
             "gmail <preset> si\n"
             "gmail <preset> sc\n"
             "gmail <preset> sa <spam_email1,spam_email2,...>\n"
@@ -134,6 +139,10 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail -v",
                 "  gmail -u",
                 "  gmail auth <client_secret_path>",
+                "  gmail sc",
+                "  gmail ti",
+                "  gmail td",
+                "  gmail st",
                 "  gmail <preset> si",
                 "  gmail <preset> sc",
                 "  gmail <preset> sa <spam_email1,spam_email2,...>",
@@ -221,6 +230,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 r -t -a \"19ca756c06a7ebcd\" \"Thanks everyone.\"",
                 "",
                 "  # Spam flow",
+                "  gmail sc",
                 "  gmail 1 si",
                 "  gmail 1 sc",
                 "  gmail 1 sa \"spam1@example.com,spam2@example.com\"",
@@ -228,6 +238,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 se \"trusted1@example.com,trusted2@example.com\"",
                 "  gmail 1 se \"@trusted-domain.com\"",
                 "  gmail 1 sa -ur",
+                "  gmail ti",
                 "",
                 "  # Contacts",
                 "  gmail 1 cn",
@@ -999,6 +1010,107 @@ def _handle_spam_clean(account, service) -> int:
     return 0
 
 
+def _run_spam_clean_all_presets() -> int:
+    config = load_config()
+    total_trashed = 0
+    ran = False
+    for preset, account in config.accounts.items():
+        service = build_gmail_service(account)
+        ran = True
+        print(f"preset={preset} email={account.email}")
+        def _progress(event: str, value: int, total: int | None = None, group_ids: int | None = None, unique_ids: int | None = None) -> None:
+            if event == "groups_total":
+                print(f"spam sender groups to process: {value}")
+            elif event == "group_processed" and total is not None:
+                ids_found = group_ids if group_ids is not None else 0
+                unique_found = unique_ids if unique_ids is not None else 0
+                print(
+                    f"processed group {value}/{total}: ids_found={ids_found} unique_ids_collected={unique_found}"
+                )
+            elif event == "trashed_total":
+                print(f"trashed so far: {value}")
+
+        result = run_cleanup_for_account(service, account, progress_callback=_progress)
+        total_trashed += result.trashed_spam
+        print(f"{preset}\ttrashed_spam={result.trashed_spam}")
+    if not ran:
+        raise UsageError("No configured presets found.")
+    print(f"sc_all complete: presets={len(config.accounts)} trashed_spam={total_trashed}")
+    return 0
+
+
+def _gmail_unit_name() -> str:
+    return "gmail"
+
+
+def _write_timer_units() -> None:
+    systemd_dir = Path.home() / ".config" / "systemd" / "user"
+    systemd_dir.mkdir(parents=True, exist_ok=True)
+    service_path = systemd_dir / f"{_gmail_unit_name()}.service"
+    timer_path = systemd_dir / f"{_gmail_unit_name()}.timer"
+    entrypoint = Path(__file__).resolve()
+    python_bin = Path(sys.executable).resolve()
+    service_body = "\n".join(
+        [
+            "[Unit]",
+            "Description=gmail spam clean all presets",
+            "",
+            "[Service]",
+            "Type=oneshot",
+            f"WorkingDirectory={entrypoint.parent}",
+            f"ExecStart={python_bin} {entrypoint} sc",
+            "",
+        ]
+    )
+    timer_body = "\n".join(
+        [
+            "[Unit]",
+            "Description=Run gmail spam clean hourly",
+            "",
+            "[Timer]",
+            "OnBootSec=5m",
+            "OnUnitActiveSec=1h",
+            "Persistent=true",
+            "",
+            "[Install]",
+            "WantedBy=timers.target",
+            "",
+        ]
+    )
+    service_path.write_text(service_body, encoding="utf-8")
+    timer_path.write_text(timer_body, encoding="utf-8")
+
+
+def _systemctl_user(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["systemctl", "--user", *args],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
+def _install_timer() -> int:
+    _write_timer_units()
+    _systemctl_user("daemon-reload")
+    _systemctl_user("enable", "--now", f"{_gmail_unit_name()}.timer")
+    print(f"timer enabled: {_gmail_unit_name()}.timer")
+    return 0
+
+
+def _disable_timer() -> int:
+    _write_timer_units()
+    _systemctl_user("disable", "--now", f"{_gmail_unit_name()}.timer")
+    print(f"timer disabled: {_gmail_unit_name()}.timer")
+    return 0
+
+
+def _timer_status() -> int:
+    result = _systemctl_user("status", f"{_gmail_unit_name()}.timer")
+    print(result.stdout.strip())
+    return 0
+
+
 def _handle_spam_add(config, account, service, params: list[str]) -> int:
     if len(params) != 1:
         raise UsageError("sa requires exactly 1 param: <spam_email1,spam_email2,...> or -ur")
@@ -1356,6 +1468,16 @@ def main(argv: list[str] | None = None) -> int:
     first = argv[0].lower()
     if first == "auth":
         return _handle_auth(argv[1:])
+    if first in GLOBAL_COMMANDS:
+        if len(argv) != 1:
+            raise UsageError(f"Use: gmail {first}")
+        if first == "sc":
+            return _run_spam_clean_all_presets()
+        if first == "ti":
+            return _install_timer()
+        if first == "td":
+            return _disable_timer()
+        return _timer_status()
     preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "se", "mr", "mra", "mur", "mstr", "mustr", "d", "ms", "cn"}
     if first in preset_required_commands:
         hint = " ".join(argv)
@@ -1456,3 +1578,7 @@ if __name__ == "__main__":
     except GmailCliError as exc:
         print(f"error: {exc.message}", file=sys.stderr)
         raise SystemExit(exc.exit_code)
+    except subprocess.CalledProcessError as exc:
+        message = exc.stderr.strip() or exc.stdout.strip() or str(exc)
+        print(f"systemctl failed: {message}", file=sys.stderr)
+        raise SystemExit(2)

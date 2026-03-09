@@ -18,10 +18,56 @@ from main import (
     _handle_send,
     main,
 )
-from gmail_cli.config import AccountConfig
+from gmail_cli.config import AccountConfig, AppConfig
 
 
 class MainCommandTests(unittest.TestCase):
+    def test_main_global_spam_clean_runs_all_presets(self) -> None:
+        account1 = AccountConfig(
+            preset="1",
+            email="one@example.com",
+            client_secret_file=Path("/tmp/client1.json"),
+            signature_file=Path("/tmp/signature1.txt"),
+        )
+        account2 = AccountConfig(
+            preset="2",
+            email="two@example.com",
+            client_secret_file=Path("/tmp/client2.json"),
+            signature_file=Path("/tmp/signature2.txt"),
+        )
+        config = AppConfig(
+            path=Path("/tmp/config.json"),
+            accounts={"1": account1, "2": account2},
+            default_list_limit=5,
+        )
+        result1 = MagicMock()
+        result1.trashed_spam = 3
+        result2 = MagicMock()
+        result2.trashed_spam = 4
+        with patch("main.load_config", return_value=config), patch(
+            "main.build_gmail_service", side_effect=[MagicMock(), MagicMock()]
+        ) as service_mock, patch(
+            "main.run_cleanup_for_account", side_effect=[result1, result2]
+        ) as cleanup_mock:
+            code = main(["sc"])
+        self.assertEqual(code, 0)
+        self.assertEqual(service_mock.call_count, 2)
+        self.assertEqual(cleanup_mock.call_count, 2)
+
+    def test_main_global_timer_install(self) -> None:
+        with patch("main._write_timer_units") as write_mock, patch(
+            "main._systemctl_user"
+        ) as systemctl_mock:
+            code = main(["ti"])
+        self.assertEqual(code, 0)
+        write_mock.assert_called_once()
+        systemctl_mock.assert_any_call("daemon-reload")
+        systemctl_mock.assert_any_call("enable", "--now", "gmail.timer")
+
+    def test_main_global_sc_rejects_extra_args(self) -> None:
+        with self.assertRaises(UsageError):
+            main(["sc", "extra"])
+
     def test_parse_editor_template(self) -> None:
         content = "\n".join(
             [

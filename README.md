@@ -68,8 +68,8 @@ Example:
 ```
 
 Notes:
-- Token files are managed automatically at `~/.gmail/tokens/<account_key>.json`.
-- The CLI auto-creates `~/.gmail/` and `~/.gmail/tokens/`.
+- Token files are managed automatically at `~/.local/share/gmail/tokens/<account_key>.json` (or `$XDG_DATA_HOME/gmail/tokens/<account_key>.json`).
+- The CLI auto-creates the token data directory when needed.
 - Normal app runs only use account-keyed tokens. Legacy preset-number token names are not read implicitly.
 - `signature_file` is required for each account and is appended automatically to all outgoing send/reply bodies.
 - `defaults.timezone_offset` controls displayed message timestamps in output (`±HH:MM`, for example `+05:30` or `-07:00`).

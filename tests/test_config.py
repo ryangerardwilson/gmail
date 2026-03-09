@@ -6,10 +6,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gmail_cli.config import (
+    data_home,
     load_config,
     normalize_contacts,
     normalize_sender_list,
     resolve_config_path,
+    token_file_for_account_key,
     update_account_contacts,
     update_account_spam_excludes,
     update_account_sender_lists,
@@ -29,6 +31,17 @@ class ConfigTests(unittest.TestCase):
     def test_resolve_config_path_default(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(resolve_config_path(), Path("~/.config/gmail/config.json").expanduser())
+
+    def test_data_home_uses_xdg(self) -> None:
+        with patch.dict(os.environ, {"XDG_DATA_HOME": "/tmp/data"}, clear=True):
+            self.assertEqual(data_home(), Path("/tmp/data/gmail"))
+
+    def test_token_file_for_account_key_uses_xdg_data_home(self) -> None:
+        with patch.dict(os.environ, {"XDG_DATA_HOME": "/tmp/data"}, clear=True):
+            self.assertEqual(
+                token_file_for_account_key("abc123"),
+                Path("/tmp/data/gmail/tokens/abc123.json"),
+            )
 
     def test_load_config_validates_required_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -16,9 +16,9 @@ using account presets defined in XDG-compliant config.
   - else `$XDG_CONFIG_HOME/gmail/config.json` (if `XDG_CONFIG_HOME` is set),
   - else `~/.config/gmail/config.json`.
 - Token storage must not be user-configured in `config.json`:
-  - always use `~/.gmail/tokens/`,
+  - always use `$XDG_DATA_HOME/gmail/tokens/` or `~/.local/share/gmail/tokens/`,
   - token file naming should use a stable internal account key rather than the preset number.
-  - CLI must automatically create `~/.gmail/` and `~/.gmail/tokens/` if missing.
+  - CLI must automatically create the data/token directories if missing.
   - do not keep legacy preset-token fallback logic in the main runtime.
 - Declarative CLI interface must support:
   - `python main.py <preset> s <to> <subject> <body>`

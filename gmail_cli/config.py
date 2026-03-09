@@ -101,6 +101,13 @@ def resolve_config_path() -> Path:
     return Path("~/.config/gmail/config.json").expanduser()
 
 
+def data_home() -> Path:
+    xdg_data_home = os.getenv("XDG_DATA_HOME")
+    if xdg_data_home:
+        return Path(xdg_data_home).expanduser() / "gmail"
+    return Path("~/.local/share/gmail").expanduser()
+
+
 def generate_account_key(client_secret_file: str | Path, account_identity: str) -> str:
     resolved_path = str(Path(client_secret_file).expanduser().resolve())
     normalized_identity = str(account_identity).strip().lower()
@@ -109,15 +116,15 @@ def generate_account_key(client_secret_file: str | Path, account_identity: str) 
 
 
 def token_file_for_account_key(account_key: str) -> Path:
-    return Path("~/.gmail/tokens").expanduser() / f"{account_key}.json"
+    return data_home() / "tokens" / f"{account_key}.json"
 
 
 def token_file_for_preset(preset: str) -> Path:
-    return Path("~/.gmail/tokens").expanduser() / f"{preset}.json"
+    return data_home() / "tokens" / f"{preset}.json"
 
 
 def ensure_token_dirs() -> None:
-    gmail_home = Path("~/.gmail").expanduser()
+    gmail_home = data_home()
     tokens_dir = gmail_home / "tokens"
     tokens_dir.mkdir(parents=True, exist_ok=True)
     for directory in (gmail_home, tokens_dir):

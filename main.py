@@ -52,6 +52,14 @@ from gmail_cli.spam_flow import (
 
 __version__ = "0.1.0"
 _TRAILING_OPTIONS = {"-cc", "-bcc", "-atch"}
+ANSI_RESET = "\033[0m"
+ANSI_GRAY = "\033[38;5;245m"
+
+
+def _muted_text(text: str) -> str:
+    if not sys.stdout.isatty() or "NO_COLOR" in os.environ:
+        return text
+    return f"{ANSI_GRAY}{text}{ANSI_RESET}"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -226,7 +234,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 ""
             ]
         )
-    print("\n".join(lines))
+    print(_muted_text("\n".join(lines)))
 
 
 def _parse_recipient_csv(value: str, flag: str) -> list[str]:

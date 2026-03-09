@@ -10,11 +10,13 @@ import subprocess
 import sys
 import tempfile
 
-from gmail_cli.auth import build_gmail_service
+from gmail_cli.auth import authorize_account, build_gmail_service
 from gmail_cli.config import (
     get_account,
     load_config,
     normalize_spam_sender_list,
+    resolve_config_path,
+    upsert_authenticated_account,
     update_account_contacts,
     update_account_spam_excludes,
     update_account_sender_lists,
@@ -68,6 +70,7 @@ def _build_parser() -> argparse.ArgumentParser:
         usage=(
             "gmail -v\n"
             "gmail -u\n"
+            "gmail auth <client_secret_path>\n"
             "gmail <preset> si\n"
             "gmail <preset> sc\n"
             "gmail <preset> sa <spam_email1,spam_email2,...>\n"
@@ -130,6 +133,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail -h",
                 "  gmail -v",
                 "  gmail -u",
+                "  gmail auth <client_secret_path>",
                 "  gmail <preset> si",
                 "  gmail <preset> sc",
                 "  gmail <preset> sa <spam_email1,spam_email2,...>",
@@ -1306,6 +1310,40 @@ def _upgrade_to_latest() -> int:
             pass
 
 
+def _default_signature_path(email: str) -> Path:
+    return Path("~/.config/gmail/signatures").expanduser() / f"{email}.txt"
+
+
+def _prompt_signature_file(email: str) -> Path:
+    default_path = _default_signature_path(email)
+    value = input(f"Signature file path [{default_path}]: ").strip()
+    path = Path(value).expanduser() if value else default_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(email, encoding="utf-8")
+    return path.resolve()
+
+
+def _handle_auth(params: list[str]) -> int:
+    if len(params) != 1:
+        raise UsageError("Use: gmail auth <client_secret_path>")
+    client_secret = Path(params[0]).expanduser()
+    if not client_secret.exists() or not client_secret.is_file():
+        raise UsageError(f"Missing client secret file: {client_secret}")
+    authorized = authorize_account(client_secret)
+    signature_file = _prompt_signature_file(authorized.email)
+    account = upsert_authenticated_account(
+        resolve_config_path(),
+        client_secret,
+        authorized.email,
+        signature_file,
+    )
+    print(
+        f"authorized preset={account.preset} email={account.email} signature_file={account.signature_file}"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -1316,6 +1354,8 @@ def main(argv: list[str] | None = None) -> int:
         _print_usage_guide(show_examples=True, show_usage=True)
         return 0
     first = argv[0].lower()
+    if first == "auth":
+        return _handle_auth(argv[1:])
     preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "se", "mr", "mra", "mur", "mstr", "mustr", "d", "ms", "cn"}
     if first in preset_required_commands:
         hint = " ".join(argv)

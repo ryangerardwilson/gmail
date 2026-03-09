@@ -22,8 +22,7 @@ pip install -r requirements.txt
    - `APIs & Services` -> `Credentials` -> `Create Credentials` -> `OAuth client ID`,
    - Application type: `Desktop app`,
    - download the client JSON.
-5. Put that JSON path into each account's `client_secret_file` in config.
-6. Run any command (for example `gmail 1 ls -ur 1`) to trigger first-time browser auth.
+5. Run `gmail auth <client_secret_path>` to create or update a preset and complete browser auth.
 
 Required permissions/scopes used by this CLI:
 - `https://www.googleapis.com/auth/gmail.send` (send/reply)
@@ -69,7 +68,7 @@ Example:
 ```
 
 Notes:
-- Token files are managed automatically at `~/.gmail/tokens/<preset>.json`.
+- Token files are managed automatically at `~/.gmail/tokens/<account_key>.json`.
 - The CLI auto-creates `~/.gmail/` and `~/.gmail/tokens/`.
 - `signature_file` is required for each account and is appended automatically to all outgoing send/reply bodies.
 - `defaults.timezone_offset` controls displayed message timestamps in output (`±HH:MM`, for example `+05:30` or `-07:00`).
@@ -80,6 +79,7 @@ Notes:
 gmail -h
 gmail -v
 gmail -u
+gmail auth <client_secret_path>
 gmail <preset> si
 gmail <preset> sc
 gmail <preset> sa <spam_email1,spam_email2,...>
@@ -115,12 +115,13 @@ gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] 
 
 Help behavior:
 - `gmail -h`: shows full examples.
-- `gmail` (no args): shows compact usage only.
+- `gmail` (no args): shows the same full help as `-h`.
 
 Examples:
 
 ```bash
 # Send email
+gmail auth ~/Documents/credentials/client_secret.json
 gmail 1 s -e
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body"
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -cc "cc1@example.com,cc2@example.com" -bcc "audit@example.com"

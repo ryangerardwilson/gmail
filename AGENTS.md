@@ -10,13 +10,14 @@ using account presets defined in XDG-compliant config.
 ## Product requirements
 - Gmail-only support for v1.
 - Multi-account via preset keys (`1`, `2`, ...), scalable to more.
+- `auth <client_secret_path>` must be the standard way to add or refresh a Google account preset.
 - Config default path must be XDG-compliant:
   - `$GMAIL_CLI_CONFIG` (if set) overrides all.
   - else `$XDG_CONFIG_HOME/gmail/config.json` (if `XDG_CONFIG_HOME` is set),
   - else `~/.config/gmail/config.json`.
 - Token storage must not be user-configured in `config.json`:
   - always use `~/.gmail/tokens/`,
-  - per-preset token file naming should be deterministic (example: `~/.gmail/tokens/1.json`).
+  - token file naming should use a stable internal account key rather than the preset number.
   - CLI must automatically create `~/.gmail/` and `~/.gmail/tokens/` if missing.
 - Declarative CLI interface must support:
   - `python main.py <preset> s <to> <subject> <body>`

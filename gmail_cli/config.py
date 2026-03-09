@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ class AccountConfig:
     email: str
     client_secret_file: Path
     signature_file: Path
+    account_key: str = ""
     spam_senders: list[str] = field(default_factory=list)
     spam_excludes: list[str] = field(default_factory=list)
     contacts: dict[str, str] = field(default_factory=dict)
@@ -99,6 +101,17 @@ def resolve_config_path() -> Path:
     return Path("~/.config/gmail/config.json").expanduser()
 
 
+def generate_account_key(client_secret_file: str | Path, account_identity: str) -> str:
+    resolved_path = str(Path(client_secret_file).expanduser().resolve())
+    normalized_identity = str(account_identity).strip().lower()
+    digest = hashlib.sha256(f"{resolved_path}|{normalized_identity}".encode("utf-8")).hexdigest()
+    return digest[:16]
+
+
+def token_file_for_account_key(account_key: str) -> Path:
+    return Path("~/.gmail/tokens").expanduser() / f"{account_key}.json"
+
+
 def token_file_for_preset(preset: str) -> Path:
     return Path("~/.gmail/tokens").expanduser() / f"{preset}.json"
 
@@ -124,6 +137,7 @@ def _validate_account(preset: str, raw: Any, config_path: Path) -> AccountConfig
     email = raw.get("email")
     client_secret = raw.get("client_secret_file")
     signature_file = raw.get("signature_file")
+    account_key = raw.get("account_key")
     spam_senders = normalize_spam_sender_list(raw.get("spam_senders"))
     spam_excludes = normalize_sender_list(raw.get("spam_excludes"))
     contacts = normalize_contacts(raw.get("contacts"))
@@ -157,11 +171,16 @@ def _validate_account(preset: str, raw: Any, config_path: Path) -> AccountConfig
             f"{config_path}: signature_file not found for preset '{preset}': "
             f"{signature_path}"
         )
+    if isinstance(account_key, str) and account_key.strip():
+        resolved_account_key = account_key.strip()
+    else:
+        resolved_account_key = generate_account_key(client_secret_path, email.strip().lower())
 
     return AccountConfig(
         preset=preset,
         email=email.strip(),
         client_secret_file=client_secret_path,
+        account_key=resolved_account_key,
         signature_file=signature_path,
         spam_senders=spam_senders,
         spam_excludes=spam_excludes,
@@ -304,3 +323,77 @@ def update_account_contacts(
 
     account["contacts"] = normalize_contacts(contacts)
     config_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+
+
+def _next_preset(accounts: dict[str, Any]) -> str:
+    numeric_ids = [int(item) for item in accounts if str(item).isdigit()]
+    return str(max(numeric_ids, default=0) + 1)
+
+
+def upsert_authenticated_account(
+    config_path: Path,
+    client_secret_file: Path,
+    email: str,
+    signature_file: Path,
+) -> AccountConfig:
+    config_path = config_path.expanduser()
+    if config_path.exists():
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ConfigError(f"Invalid JSON in config {config_path}: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise ConfigError(f"Invalid config at {config_path}: root must be an object")
+    else:
+        raw = {}
+
+    accounts = raw.get("accounts")
+    if accounts is None:
+        accounts = {}
+        raw["accounts"] = accounts
+    if not isinstance(accounts, dict):
+        raise ConfigError(f"Invalid config at {config_path}: 'accounts' must be an object")
+
+    defaults = raw.get("defaults")
+    if defaults is None:
+        raw["defaults"] = {"list_limit": 10, "timezone_offset": "+05:30"}
+    elif not isinstance(defaults, dict):
+        raise ConfigError(f"Invalid config at {config_path}: 'defaults' must be an object")
+
+    normalized_secret = client_secret_file.expanduser().resolve()
+    normalized_email = email.strip().lower()
+    normalized_signature = signature_file.expanduser().resolve()
+    account_key = generate_account_key(normalized_secret, normalized_email)
+
+    target_preset: str | None = None
+    for preset, account in accounts.items():
+        if not isinstance(account, dict):
+            continue
+        existing_key = str(account.get("account_key", "")).strip()
+        if not existing_key:
+            existing_email = str(account.get("email", "")).strip().lower()
+            existing_secret = str(account.get("client_secret_file", "")).strip()
+            if existing_email and existing_secret:
+                existing_key = generate_account_key(existing_secret, existing_email)
+        if existing_key == account_key:
+            target_preset = str(preset)
+            break
+
+    if target_preset is None:
+        target_preset = _next_preset(accounts)
+
+    account_payload = accounts.get(target_preset, {})
+    if not isinstance(account_payload, dict):
+        account_payload = {}
+    account_payload["email"] = normalized_email
+    account_payload["client_secret_file"] = str(normalized_secret)
+    account_payload["account_key"] = account_key
+    account_payload["signature_file"] = str(normalized_signature)
+    account_payload["spam_senders"] = normalize_spam_sender_list(account_payload.get("spam_senders"))
+    account_payload["spam_excludes"] = normalize_sender_list(account_payload.get("spam_excludes"))
+    account_payload["contacts"] = normalize_contacts(account_payload.get("contacts"))
+    accounts[target_preset] = account_payload
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+    return load_config(config_path).accounts[target_preset]

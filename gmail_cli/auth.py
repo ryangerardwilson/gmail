@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
-from .config import AccountConfig, ensure_token_dirs, token_file_for_preset
+from .config import AccountConfig, ensure_token_dirs, generate_account_key, token_file_for_account_key, token_file_for_preset
 from .errors import ApiError
 
 try:
@@ -23,6 +24,13 @@ SCOPES = [
 ]
 
 
+@dataclass(frozen=True)
+class AuthorizedGmailAccount:
+    email: str
+    account_key: str
+    creds: Credentials
+
+
 def _load_credentials(token_path: Path) -> Credentials | None:
     if Credentials is None:
         raise ApiError(
@@ -33,6 +41,52 @@ def _load_credentials(token_path: Path) -> Credentials | None:
     return None
 
 
+def _write_token(token_path: Path, creds: Credentials) -> None:
+    token_path.write_text(creds.to_json(), encoding="utf-8")
+    try:
+        token_path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def authorize_account(client_secret_file: Path) -> AuthorizedGmailAccount:
+    if Request is None or InstalledAppFlow is None:
+        raise ApiError(
+            "Missing Google auth dependencies. Install with: pip install -r requirements.txt"
+        )
+    ensure_token_dirs()
+    try:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(client_secret_file),
+            SCOPES,
+        )
+        creds = flow.run_local_server(
+            port=0,
+            authorization_prompt_message="Authorize in the browser window. Return here after approval.",
+            success_message="Authorization complete. You can close this tab.",
+        )
+    except Exception as exc:  # pragma: no cover - network/runtime dependent
+        raise ApiError(
+            "OAuth authorization failed. Ensure the account is an allowed test user "
+            f"and the Gmail API is enabled. Details: {exc}"
+        ) from exc
+    if build is None:
+        raise ApiError(
+            "Missing Google API dependencies. Install with: pip install -r requirements.txt"
+        )
+    try:
+        service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+        profile = service.users().getProfile(userId="me").execute()
+        email = str(profile.get("emailAddress", "")).strip().lower()
+    except Exception as exc:
+        raise ApiError(f"Failed to fetch Gmail profile after OAuth: {exc}") from exc
+    if not email:
+        raise ApiError("Gmail profile lookup returned no email address")
+    account_key = generate_account_key(client_secret_file, email)
+    _write_token(token_file_for_account_key(account_key), creds)
+    return AuthorizedGmailAccount(email=email, account_key=account_key, creds=creds)
+
+
 def get_credentials(account: AccountConfig) -> Credentials:
     if Request is None or InstalledAppFlow is None:
         raise ApiError(
@@ -40,7 +94,11 @@ def get_credentials(account: AccountConfig) -> Credentials:
         )
 
     ensure_token_dirs()
-    token_path = token_file_for_preset(account.preset)
+    token_path = token_file_for_account_key(account.account_key)
+    preset_token_path = token_file_for_preset(account.preset)
+    if not token_path.exists() and preset_token_path.exists():
+        creds = Credentials.from_authorized_user_file(str(preset_token_path), SCOPES)
+        _write_token(token_path, creds)
 
     creds = _load_credentials(token_path)
 
@@ -53,30 +111,12 @@ def get_credentials(account: AccountConfig) -> Credentials:
         except Exception as exc:  # pragma: no cover - network/runtime dependent
             raise ApiError(f"Failed to refresh Gmail token for preset {account.preset}: {exc}") from exc
     else:
-        try:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(account.client_secret_file),
-                SCOPES,
-            )
-            creds = flow.run_local_server(
-                port=0,
-                authorization_prompt_message="Authorize in the browser window. Return here after approval.",
-                success_message="Authorization complete. You can close this tab.",
-            )
-        except Exception as exc:  # pragma: no cover - network/runtime dependent
-            raise ApiError(
-                "OAuth authorization failed. Ensure the account is an allowed test user "
-                f"and the Gmail API is enabled. Details: {exc}"
-            ) from exc
+        creds = authorize_account(account.client_secret_file).creds
 
     if creds is None:
         raise ApiError("Failed to obtain credentials")
 
-    token_path.write_text(creds.to_json(), encoding="utf-8")
-    try:
-        token_path.chmod(0o600)
-    except OSError:
-        pass
+    _write_token(token_path, creds)
 
     return creds
 

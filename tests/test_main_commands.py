@@ -1,9 +1,11 @@
 import unittest
-from unittest.mock import MagicMock, patch
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
 
 from gmail_cli.errors import ApiError, UsageError
 from main import (
+    _build_runtime_command,
     _handle_delete,
     _handle_list,
     _handle_mark_spammer,
@@ -63,6 +65,24 @@ class MainCommandTests(unittest.TestCase):
         write_mock.assert_called_once()
         systemctl_mock.assert_any_call("daemon-reload")
         systemctl_mock.assert_any_call("enable", "--now", "gmail.timer")
+
+    def test_build_runtime_command_uses_launcher_only_when_frozen(self) -> None:
+        with patch("sys.executable", "/tmp/gmail"), patch("sys.frozen", True, create=True):
+            self.assertEqual(_build_runtime_command("sc"), "/tmp/gmail sc")
+
+    def test_write_timer_units_uses_launcher_only_when_frozen(self) -> None:
+        with TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            with patch("main.Path.home", return_value=home), patch(
+                "sys.executable", "/tmp/gmail"
+            ), patch("sys.frozen", True, create=True):
+                from main import _write_timer_units
+
+                _write_timer_units()
+            service_path = home / ".config" / "systemd" / "user" / "gmail.service"
+            service_body = service_path.read_text(encoding="utf-8")
+            self.assertIn("ExecStart=/usr/bin/env bash -lc '/tmp/gmail sc &&", service_body)
+            self.assertNotIn("main.py sc", service_body)
 
     def test_main_global_sc_rejects_extra_args(self) -> None:
         with self.assertRaises(UsageError):

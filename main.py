@@ -52,7 +52,7 @@ from gmail_cli.spam_flow import (
     run_identify_for_account,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.29"
 _TRAILING_OPTIONS = {"-cc", "-bcc", "-atch"}
 ANSI_RESET = "\033[0m"
 ANSI_GRAY = "\033[38;5;245m"
@@ -1043,20 +1043,21 @@ def _gmail_unit_name() -> str:
     return "gmail"
 
 
+def _build_runtime_command(*args: str) -> str:
+    command_parts = [shlex.quote(str(Path(sys.executable).resolve()))]
+    if not getattr(sys, "frozen", False):
+        command_parts.append(shlex.quote(str(Path(__file__).resolve())))
+    command_parts.extend(shlex.quote(arg) for arg in args)
+    return " ".join(command_parts)
+
+
 def _write_timer_units() -> None:
     systemd_dir = Path.home() / ".config" / "systemd" / "user"
     systemd_dir.mkdir(parents=True, exist_ok=True)
     service_path = systemd_dir / f"{_gmail_unit_name()}.service"
     timer_path = systemd_dir / f"{_gmail_unit_name()}.timer"
     entrypoint = Path(__file__).resolve()
-    python_bin = Path(sys.executable).resolve()
-    run_command = " ".join(
-        [
-            shlex.quote(str(python_bin)),
-            shlex.quote(str(entrypoint)),
-            "sc",
-        ]
-    )
+    run_command = _build_runtime_command("sc")
     notify_command = "notify-send 'gmail' 'Hourly spam clean finished successfully'"
     service_body = "\n".join(
         [

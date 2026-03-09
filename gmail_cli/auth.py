@@ -87,6 +87,22 @@ def authorize_account(client_secret_file: Path) -> AuthorizedGmailAccount:
     return AuthorizedGmailAccount(email=email, account_key=account_key, creds=creds)
 
 
+def migrate_legacy_token(account: AccountConfig) -> Path:
+    ensure_token_dirs()
+    if not account.account_key:
+        raise ApiError(
+            f"preset {account.preset} is missing account_key; re-run `gmail auth <client_secret_path>`"
+        )
+    target_path = token_file_for_account_key(account.account_key)
+    if target_path.exists():
+        return target_path
+    preset_token_path = token_file_for_preset(account.preset)
+    if not preset_token_path.exists():
+        raise ApiError(f"no legacy token found for preset {account.preset}")
+    preset_token_path.rename(target_path)
+    return target_path
+
+
 def get_credentials(account: AccountConfig) -> Credentials:
     if Request is None or InstalledAppFlow is None:
         raise ApiError(
@@ -94,12 +110,11 @@ def get_credentials(account: AccountConfig) -> Credentials:
         )
 
     ensure_token_dirs()
+    if not account.account_key:
+        raise ApiError(
+            f"preset {account.preset} is missing account_key; re-run `gmail auth <client_secret_path>`"
+        )
     token_path = token_file_for_account_key(account.account_key)
-    preset_token_path = token_file_for_preset(account.preset)
-    if not token_path.exists() and preset_token_path.exists():
-        creds = Credentials.from_authorized_user_file(str(preset_token_path), SCOPES)
-        _write_token(token_path, creds)
-
     creds = _load_credentials(token_path)
 
     if creds and creds.valid:

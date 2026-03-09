@@ -73,8 +73,11 @@ class MainCommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         output = stdout.getvalue()
         self.assertIn("Gmail CLI", output)
-        self.assertIn("send a new email, optionally with cc, bcc, attachments, or editor mode", output)
+        self.assertIn("features:", output)
+        self.assertIn("send a new email, with optional editor mode, cc, bcc, and attachments", output)
+        self.assertIn("# <preset> ls <query>|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...", output)
         self.assertIn("gmail 1 ls -ur", output)
+        self.assertNotIn("commands:", output)
         self.assertNotIn("usage:", output)
 
     def test_build_runtime_command_uses_launcher_only_when_frozen(self) -> None:

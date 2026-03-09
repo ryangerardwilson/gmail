@@ -19,7 +19,7 @@ using account presets defined in XDG-compliant config.
   - always use `~/.gmail/tokens/`,
   - token file naming should use a stable internal account key rather than the preset number.
   - CLI must automatically create `~/.gmail/` and `~/.gmail/tokens/` if missing.
-  - do not keep legacy preset-token fallback logic in the main runtime; use a separate one-time migration script if needed.
+  - do not keep legacy preset-token fallback logic in the main runtime.
 - Declarative CLI interface must support:
   - `python main.py <preset> s <to> <subject> <body>`
   - `python main.py <preset> ls <query>`

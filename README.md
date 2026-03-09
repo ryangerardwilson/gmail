@@ -71,9 +71,6 @@ Notes:
 - Token files are managed automatically at `~/.gmail/tokens/<account_key>.json`.
 - The CLI auto-creates `~/.gmail/` and `~/.gmail/tokens/`.
 - Normal app runs only use account-keyed tokens. Legacy preset-number token names are not read implicitly.
-- If you need to rename old preset-based tokens once, use:
-  - `python scripts/migrate_legacy_tokens.py`
-  - or `python scripts/migrate_legacy_tokens.py <preset>`
 - `signature_file` is required for each account and is appended automatically to all outgoing send/reply bodies.
 - `defaults.timezone_offset` controls displayed message timestamps in output (`±HH:MM`, for example `+05:30` or `-07:00`).
 

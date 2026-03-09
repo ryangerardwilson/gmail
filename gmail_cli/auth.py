@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import AccountConfig, ensure_token_dirs, generate_account_key, token_file_for_account_key, token_file_for_preset
+from .config import AccountConfig, ensure_token_dirs, generate_account_key, token_file_for_account_key
 from .errors import ApiError
 
 try:
@@ -85,23 +85,6 @@ def authorize_account(client_secret_file: Path) -> AuthorizedGmailAccount:
     account_key = generate_account_key(client_secret_file, email)
     _write_token(token_file_for_account_key(account_key), creds)
     return AuthorizedGmailAccount(email=email, account_key=account_key, creds=creds)
-
-
-def migrate_legacy_token(account: AccountConfig) -> Path:
-    ensure_token_dirs()
-    if not account.account_key:
-        raise ApiError(
-            f"preset {account.preset} is missing account_key; re-run `gmail auth <client_secret_path>`"
-        )
-    target_path = token_file_for_account_key(account.account_key)
-    if target_path.exists():
-        return target_path
-    preset_token_path = token_file_for_preset(account.preset)
-    if not preset_token_path.exists():
-        raise ApiError(f"no legacy token found for preset {account.preset}")
-    preset_token_path.rename(target_path)
-    return target_path
-
 
 def get_credentials(account: AccountConfig) -> Credentials:
     if Request is None or InstalledAppFlow is None:

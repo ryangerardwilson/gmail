@@ -160,8 +160,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail <preset> ls -ra [limit]",
                 "  gmail <preset> ls [-o] -t <thread_id>",
                 "  gmail <preset> r [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
-                "  gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]",
-                ""
+                "  gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
             ]
         )
     if show_examples:

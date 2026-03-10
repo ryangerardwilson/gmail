@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 
+from _version import __version__
 from gmail_cli.auth import authorize_account, build_gmail_service
 from gmail_cli.config import (
     get_account,
@@ -52,11 +53,10 @@ from gmail_cli.spam_flow import (
     run_identify_for_account,
 )
 
-__version__ = "0.1.29"
 _TRAILING_OPTIONS = {"-cc", "-bcc", "-atch"}
 ANSI_RESET = "\033[0m"
 ANSI_GRAY = "\033[38;5;245m"
-GLOBAL_COMMANDS = {"sc", "ti", "td", "st"}
+GLOBAL_COMMANDS = {"conf", "sc", "ti", "td", "st"}
 
 
 def _muted_text(text: str) -> str:
@@ -71,6 +71,7 @@ def _build_parser() -> argparse.ArgumentParser:
         usage=(
             "gmail -v\n"
             "gmail -u\n"
+            "gmail conf\n"
             "gmail auth <client_secret_path>\n"
             "gmail sc\n"
             "gmail ti\n"
@@ -140,6 +141,8 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
         "    print the installed version",
         "  gmail -u",
         "    upgrade to the latest release",
+        "  gmail conf",
+        "    open the config in $VISUAL/$EDITOR",
     ]
     if show_examples:
         lines.extend(
@@ -338,6 +341,37 @@ def _open_editor_template(
             tmp_path.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def _open_config_in_editor(config_path: Path | None = None) -> int:
+    resolved_path = (config_path or resolve_config_path()).expanduser()
+    if not resolved_path.exists():
+        example_path = Path(__file__).with_name("example_config.json")
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+        if example_path.exists():
+            resolved_path.write_text(
+                example_path.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+        else:
+            resolved_path.write_text(
+                '{\n  "defaults": {\n    "list_limit": 10,\n    "timezone_offset": "+05:30"\n  },\n  "accounts": {}\n}\n',
+                encoding="utf-8",
+            )
+
+    editor_cmd = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vim"
+    editor_parts = shlex.split(editor_cmd)
+    if not editor_parts:
+        raise UsageError("Editor command is empty. Set VISUAL or EDITOR.")
+    try:
+        proc = subprocess.run([*editor_parts, str(resolved_path)], check=False)
+    except FileNotFoundError as exc:
+        raise UsageError(
+            f"Editor not found: {editor_cmd}. Set VISUAL or EDITOR to a valid editor."
+        ) from exc
+    if proc.returncode != 0:
+        raise UsageError(f"Editor exited with code {proc.returncode}")
+    return 0
 
 
 def _parse_attachment_path(value: str) -> Path:
@@ -1317,19 +1351,7 @@ def _handle_contacts(config, account, params: list[str]) -> int:
     if action == "-e":
         if len(params) != 1:
             raise UsageError("cn -e does not accept extra args")
-        editor_cmd = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vim"
-        editor_parts = shlex.split(editor_cmd)
-        if not editor_parts:
-            raise UsageError("Editor command is empty. Set VISUAL or EDITOR.")
-        try:
-            proc = subprocess.run([*editor_parts, str(config.path)], check=False)
-        except FileNotFoundError as exc:
-            raise UsageError(
-                f"Editor not found: {editor_cmd}. Set VISUAL or EDITOR to a valid editor."
-            ) from exc
-        if proc.returncode != 0:
-            raise UsageError(f"Editor exited with code {proc.returncode}")
-        return 0
+        return _open_config_in_editor(config.path)
 
     if action == "-a":
         if len(params) != 3:
@@ -1455,6 +1477,8 @@ def main(argv: list[str] | None = None) -> int:
     if first in GLOBAL_COMMANDS:
         if len(argv) != 1:
             raise UsageError(f"Use: gmail {first}")
+        if first == "conf":
+            return _open_config_in_editor()
         if first == "sc":
             return _run_spam_clean_all_presets()
         if first == "ti":

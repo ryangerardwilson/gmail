@@ -1,7 +1,12 @@
 # AGENTS.md
 
+## Workspace Defaults
+- Follow `/home/ryan/Documents/agent_context/CLI_TUI_STYLE_GUIDE.md` for CLI/TUI taste and help shape.
+- Follow `/home/ryan/Documents/agent_context/CANONICAL_REFERENCE_IMPLEMENTATION_FOR_CLI_AND_TUI_APPS.md` for executable contract details such as `-h`, `-v`, `-u`, installer behavior, release workflow expectations, and regression expectations.
+- This file only records `gmail`-specific constraints or durable deviations.
+
 ## Mission
-Implement a Gmail-only declarative CLI in this repository that can:
+Implement a Gmail-only CLI in this repository that can:
 - send email,
 - list/search email,
 - reply to email by message id,
@@ -21,9 +26,9 @@ using account presets defined in XDG-compliant config.
   - token file naming should use a stable internal account key rather than the preset number.
   - CLI must automatically create the data/token directories if missing.
   - do not keep legacy preset-token fallback logic in the main runtime.
-- Declarative CLI interface must support:
+- CLI interface must support:
   - `python main.py <preset> s <to> <subject> <body>`
-  - `python main.py <preset> ls <query>`
+  - `python main.py <preset> ls [limit] [-f <from>] [-c <contains>]`
   - `python main.py <preset> r <message_id> <body>`
 - Spam cleanup should support both:
   - `python main.py <preset> sc`
@@ -32,7 +37,10 @@ using account presets defined in XDG-compliant config.
   - `python main.py ti`
   - `python main.py td`
   - `python main.py st`
-- Query example to support: `"from maanas limit 1"`.
+- List examples to support:
+  - `python main.py 1 ls 10`
+  - `python main.py 1 ls -f maanas 1`
+  - `python main.py 1 ls -c invoice 10`
 
 ## Architecture expectations
 - Keep API boundaries clean:
@@ -75,12 +83,12 @@ Adjust structure if needed, but preserve separation of concerns.
   - proper `Re:` subject handling.
 
 ## Search/query behavior
-- Parse declarative query string into:
-  - Gmail `q` expression
-  - optional `maxResults` (from `limit`).
-- v1 keywords to support:
-  - `from`, `to`, `subject`, `limit`, `after`, `before`, `unread`.
-- Unknown tokens should fall back to generic Gmail search terms rather than hard fail.
+- Parse `ls` args into:
+  - optional positional `limit`
+  - `-f <from>` sender filter
+  - `-c <contains>` Gmail full-text term filter
+  - Gmail `q` expression plus `maxResults`
+- Unknown `ls` tokens should fail fast with a short shape error.
 
 ## Output contract
 - `ls` must print rows including:
@@ -115,6 +123,6 @@ Adjust structure if needed, but preserve separation of concerns.
 - Global `sc` runs spam cleanup across all configured presets.
 - `ti` installs one hourly user timer that runs the same global spam cleanup command and sends a success notification through `notify-send`.
 - Config path resolution is XDG-compliant.
-- Query example `from maanas limit 1` works.
+- `ls 10`, `ls -f maanas 1`, and `ls -c invoice 10` work.
 - Tests for core parsing/config logic pass locally.
 - README is sufficient for a new user to run first auth and send an email.

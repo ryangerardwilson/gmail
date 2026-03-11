@@ -1,6 +1,6 @@
 # Gmail CLI
 
-Declarative Gmail-only CLI with multi-account presets.
+Gmail-only CLI with multi-account presets.
 
 ## Install
 
@@ -111,12 +111,12 @@ gmail <preset> d <message_id>
 gmail <preset> ms <message_id>
 gmail <preset> s -e
 gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
-gmail <preset> ls [-o] <query>
+gmail <preset> ls [-o] [limit] [-f <from>] [-c <contains>]
 gmail <preset> ls [-o] -ur [limit]
 gmail <preset> ls [-o] -r [limit]
 gmail <preset> ls [-o] -str [limit]
 gmail <preset> ls [-o] -ext <limit>
-gmail <preset> ls [-o] -snt [limit|query]
+gmail <preset> ls [-o] -snt [limit] [-f <from>] [-c <contains>]
 gmail <preset> ls -ura [limit]
 gmail <preset> ls -ra [limit]
 gmail <preset> ls [-o] -t <thread_id>
@@ -140,8 +140,9 @@ gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt" "/tmp/project_dir"
 
 # List and audit messages
-gmail 1 ls "from maanas limit 1"
-gmail 1 ls "from xyz limit 5"
+gmail 1 ls 10
+gmail 1 ls -f maanas 1
+gmail 1 ls -f xyz 5
 gmail 1 ls -ur
 gmail 1 ls -ur 1
 gmail 1 ls -r
@@ -150,14 +151,13 @@ gmail 1 ls -str
 gmail 1 ls -str 5
 gmail 1 ls -ext 10
 gmail 1 ls -snt 10
-gmail 1 ls -snt "silvia"
-gmail 1 ls -o "from xyz limit 1"
+gmail 1 ls -snt -c silvia 10
+gmail 1 ls -o -f xyz 1
 gmail 1 ls -o -ur 1
 # Audit unread emails
 gmail 1 ls -ura 10
 # Audit read emails
 gmail 1 ls -ra 10
-gmail 1 ls "to silvia limit 1"
 gmail 1 ls -t "19ca756c06a7ebcd"
 
 # Single-message utilities
@@ -239,13 +239,17 @@ Bash completion:
 - Installer adds Bash completion for the `gmail` command only (not `python main.py`).
 - For `gmail <preset> s <TAB>`, completions include that preset's contact aliases.
 
-Declarative query keywords for `ls "<query>"`:
-- `from`, `to`, `subject`, `after`, `before`, `unread`, `contains`, `limit`.
-- Example: `gmail 1 ls "from xyz limit 5"`.
+List flags:
+- `ls 10`: list 10 non-sent messages.
+- `ls -f <from> [limit]`: filter by sender.
+- `ls -c <contains> [limit]`: filter by Gmail full-text search term.
+- Combine them as needed, for example: `gmail 1 ls -f xyz@example.com -c invoice 10`.
+- `ls` excludes messages in `Sent`; use `ls -snt ...` to search sent mail.
+- `ls` no longer accepts the old quoted declarative query form.
 
 Message utilities:
-- `o <message_id>`: open one message with full body output, mark it as read, and download attachments to current working directory.
-- `o -t <thread_id>`: open all messages in a thread (ascending order), apply existing color formatting per message, mark all thread messages as read, and download attachments to current working directory.
+- `o <message_id>`: open one message with full body output, mark it as read, and download attachments into `./atch_<preset>_<message_id>/`.
+- `o -t <thread_id>`: open all messages in a thread (ascending order), apply existing color formatting per message, mark all thread messages as read, and download each message's attachments into `./atch_<preset>_<message_id>/`.
 - `mr <message_id>`: mark a single message as read.
 - `mra`: mark all unread messages as read.
 - `mur <message_id>`: mark a single message as unread.
@@ -255,9 +259,9 @@ Message utilities:
 - `ms <message_id>`: mark sender as spam (adds sender to `spam_senders` subject to safety normalization) and trashes the message.
 - `ls -ur [limit]`: list unread messages only; if `limit` is omitted, uses config default list limit.
 - `ls -r [limit]`: list read received messages only (excludes sent); if `limit` is omitted, uses config default list limit.
-- `ls -str [limit]`: list starred messages only; if `limit` is omitted, lists all starred messages.
+- `ls -str [limit]`: list starred non-sent messages only; if `limit` is omitted, lists all starred non-sent messages.
 - `ls -ext <limit>`: list external-domain messages only (excludes your own sender address and your preset domain).
-- `ls -snt [limit|query]`: list/search sent messages. If `limit` is numeric, it limits sent results. Otherwise it is treated as a sent query.
+- `ls -snt [limit] [-f <from>] [-c <contains>]`: list/search sent messages with the same flag grammar as `ls`.
 - `ls -o ...`: prints full body for each listed message and marks listed messages as read.
 - `ls -o` is supported with normal list modes (`<query>`, `-ur`, `-r`, `-ext`, `-snt`, `-t`) and not supported with audit modes (`-ura`, `-ra`).
 - `ls -ura [limit]`: interactive unread audit. Without `limit`, audits all unread messages continuously in batches of 10. For each unread message: `s` marks spam (adds sender to `spam_senders` and trashes message), `t` trashes message without spam-list update, `n` leaves message unread, `q` stops audit.

@@ -14,14 +14,15 @@
 ## 2. CLI contract (v1)
 - Primary entrypoint:
   - `python main.py <preset> s <to> <subject> <body>`
-  - `python main.py <preset> ls <query>`
+- `python main.py <preset> ls [limit] [-f <from>] [-c <contains>]`
   - `python main.py <preset> r <message_id> <body>`
 - Aliases and compatibility:
   - Accept `-s` as alias for `s` if desired.
   - Prefer `ls` over overloaded flags to keep parsing explicit.
 - Examples:
   - `python main.py 1 s "xyz@example.com" "this is the subject" "this is the body"`
-  - `python main.py 1 ls "from maanas limit 1"`
+- `python main.py 1 ls 10`
+- `python main.py 1 ls -f maanas 1`
   - `python main.py 1 r "18f3..." "Thanks, sharing this now."`
 
 ## 3. Project structure
@@ -30,7 +31,7 @@
   - `config.py`: XDG config loading + validation.
   - `auth.py`: OAuth/token handling per account preset.
   - `gmail_api.py`: Thin wrapper around Gmail API calls.
-  - `query_parser.py`: Declarative search query parsing.
+  - `query_parser.py`: `ls` flag parsing.
   - `formatters.py`: Terminal output formatting.
   - `errors.py`: Custom exceptions and user-facing error mapping.
 - `tests/`
@@ -99,13 +100,13 @@
   - Failure: clear reason and next action.
 
 ### 6.2 List/Search (`ls`)
-- Input: `<query_string>` like `"from maanas limit 1"`.
-- Declarative parser v1 grammar (simple):
-  - tokens by whitespace.
-  - recognized keywords: `from`, `to`, `subject`, `limit`, `after`, `before`, `unread`.
-  - free words become generic Gmail `q` terms.
+- Input: `[limit] [-f <from>] [-c <contains>]`.
+- `ls` parser v1 grammar:
+  - one optional positional positive integer for `maxResults`
+  - `-f <from>` maps to Gmail `from:<from>`
+  - `-c <contains>` maps to a generic Gmail full-text term
 - Conversion to Gmail query:
-  - `from maanas limit 1` -> Gmail `q="from:maanas"`, `maxResults=1`.
+  - `-f maanas 1` -> Gmail `q="from:maanas"`, `maxResults=1`.
 - API sequence:
   - `users.messages.list(userId="me", q=..., maxResults=...)`
   - For each message id, fetch metadata/snippet via `users.messages.get(format="metadata")`.

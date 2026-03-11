@@ -46,7 +46,7 @@ from gmail_cli.gmail_api import (
     reply_to_thread,
     send_email,
 )
-from gmail_cli.query_parser import parse_declarative_query
+from gmail_cli.query_parser import parse_list_query_args
 from gmail_cli.spam_flow import (
     make_identify_decision,
     run_cleanup_for_account,
@@ -67,7 +67,7 @@ def _muted_text(text: str) -> str:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Declarative Gmail CLI",
+        description="Gmail CLI",
         usage=(
             "gmail -v\n"
             "gmail -u\n"
@@ -97,12 +97,12 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> ms <message_id>\n"
             "gmail <preset> s -e\n"
             "gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
-            "gmail <preset> ls [-o] <query>\n"
+            "gmail <preset> ls [-o] [limit] [-f <from>] [-c <contains>]\n"
             "gmail <preset> ls [-o] -ur [limit]\n"
             "gmail <preset> ls [-o] -r [limit]\n"
             "gmail <preset> ls [-o] -str [limit]\n"
             "gmail <preset> ls [-o] -ext <limit>\n"
-            "gmail <preset> ls [-o] -snt [limit|query]\n"
+            "gmail <preset> ls [-o] -snt [limit] [-f <from>] [-c <contains>]\n"
             "gmail <preset> ls -ura [limit]\n"
             "gmail <preset> ls -ra [limit]\n"
             "gmail <preset> ls [-o] -t <thread_id>\n"
@@ -162,9 +162,10 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
                 "",
                 "  search, list, open, and audit messages",
-                "  # <preset> ls <query>|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
-                "  gmail 1 ls \"contains jake limit 1\"",
-                "  gmail 1 ls \"from xyz limit 5\"",
+                "  # <preset> ls [limit] [-f <from>] [-c <contains>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
+                "  gmail 1 ls 10",
+                "  gmail 1 ls -f xyz@example.com 5",
+                "  gmail 1 ls -c jake 1",
                 "  gmail 1 ls -ur",
                 "  gmail 1 ls -ur 1",
                 "  gmail 1 ls -r",
@@ -173,13 +174,12 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 ls -str 5",
                 "  gmail 1 ls -ext 10",
                 "  gmail 1 ls -snt 10",
-                "  gmail 1 ls -snt \"silvia\"",
-                "  gmail 1 ls -o \"from xyz limit 1\"",
+                "  gmail 1 ls -snt -c silvia 10",
+                "  gmail 1 ls -o -f xyz@example.com 1",
                 "  gmail 1 ls -o -ur 1",
                 "  # <preset> ls -ura|-ra <number_of_messages_to_audit>",
                 "  gmail 1 ls -ura 10",
                 "  gmail 1 ls -ra 10",
-                "  gmail 1 ls \"to silvia limit 1\"",
                 "  gmail 1 ls -t \"19ca756c06a7ebcd\"",
                 "",
                 "  open or change message state",
@@ -627,6 +627,17 @@ def _sort_messages_oldest_first(messages: list[dict]) -> list[dict]:
     return sorted(messages, key=_internal_date_key)
 
 
+def _exclude_sent_query(*terms: str) -> str:
+    filtered = [term for term in terms if term.strip()]
+    filtered.append("-in:sent")
+    return " ".join(filtered)
+
+
+def _attachment_download_dir(preset: str, message_id: str, cwd: Path | None = None) -> Path:
+    root = cwd or Path.cwd()
+    return root / f"atch_{preset}_{message_id}"
+
+
 def _handle_list(
     service,
     params: list[str],
@@ -638,27 +649,27 @@ def _handle_list(
 ) -> int:
     open_mode, filtered_params = _extract_list_open_flag(params)
     if not filtered_params:
-        raise UsageError("ls requires a query string, e.g. \"from maanas limit 1\"")
+        raise UsageError("ls requires [limit], -f <from>, -c <contains>, or a mode flag like -ur")
     if filtered_params[0] in {"-ura", "-ra"} and open_mode:
         raise UsageError("ls -o is not supported with -ura or -ra")
 
     if filtered_params[0] == "-ur":
         max_results = _parse_optional_limit("ls -ur", filtered_params)
-        messages = _list_with_optional_limit(service, "is:unread", max_results)
+        messages = _list_with_optional_limit(service, _exclude_sent_query("is:unread"), max_results)
         messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
     if filtered_params[0] == "-r":
         max_results = _parse_optional_limit("ls -r", filtered_params)
-        messages = _list_with_optional_limit(service, f"is:read -from:{my_email}", max_results)
+        messages = _list_with_optional_limit(service, _exclude_sent_query("is:read"), max_results)
         messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
     if filtered_params[0] == "-str":
         max_results = _parse_optional_limit("ls -str", filtered_params)
-        messages = _list_with_optional_limit(service, "is:starred", max_results)
+        messages = _list_with_optional_limit(service, _exclude_sent_query("is:starred"), max_results)
         messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
@@ -675,7 +686,7 @@ def _handle_list(
             if max_results <= 0:
                 raise UsageError("ls -ext limit must be > 0")
         domain = my_email.split("@", 1)[1].strip().lower() if "@" in my_email else ""
-        ext_query = f"-from:{my_email}"
+        ext_query = _exclude_sent_query(f"-from:{my_email}")
         if domain:
             ext_query += f" -from:*@{domain}"
         messages = _list_with_optional_limit(service, ext_query, max_results)
@@ -702,8 +713,12 @@ def _handle_list(
             if max_results == 0:
                 raise UsageError("ls -snt limit must be > 0")
 
-        sent_query = "in:sent " + " ".join(filtered_params[1:])
-        parsed = parse_declarative_query(sent_query, default_limit)
+        parsed = parse_list_query_args(
+            filtered_params[1:],
+            default_limit,
+            base_terms=["in:sent"],
+            require_filter_or_limit=True,
+        )
         messages = _list_with_optional_limit(service, parsed.gmail_query, parsed.max_results)
         messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
@@ -713,14 +728,30 @@ def _handle_list(
         if config_path is None or account is None:
             raise UsageError("Internal error: ls -ura requires account context")
         return _run_audit_mode(
-            service, filtered_params, default_limit, config_path, account, "is:unread", "unread", "ura", utc_offset
+            service,
+            filtered_params,
+            default_limit,
+            config_path,
+            account,
+            _exclude_sent_query("is:unread"),
+            "unread",
+            "ura",
+            utc_offset,
         )
 
     if filtered_params[0] == "-ra":
         if config_path is None or account is None:
             raise UsageError("Internal error: ls -ra requires account context")
         return _run_audit_mode(
-            service, filtered_params, default_limit, config_path, account, "is:read", "read", "ra", utc_offset
+            service,
+            filtered_params,
+            default_limit,
+            config_path,
+            account,
+            _exclude_sent_query("is:read"),
+            "read",
+            "ra",
+            utc_offset,
         )
 
     if filtered_params[0] == "-t":
@@ -732,8 +763,7 @@ def _handle_list(
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
-    query = " ".join(filtered_params)
-    parsed = parse_declarative_query(query, default_limit)
+    parsed = parse_list_query_args(filtered_params, default_limit, base_terms=["-in:sent"])
     messages = _list_with_optional_limit(service, parsed.gmail_query, parsed.max_results)
     messages = _sort_messages_oldest_first(messages)
     _print_list_results(service, messages, my_email, utc_offset, open_mode)
@@ -1219,7 +1249,7 @@ def _handle_mark_read_all(service, params: list[str]) -> int:
 
 
 def _handle_open_message(
-    service, params: list[str], my_email: str, utc_offset: str = "+05:30"
+    service, params: list[str], my_email: str, preset: str, utc_offset: str = "+05:30"
 ) -> int:
     if not params:
         raise UsageError("o requires: <message_id> or -t <thread_id>")
@@ -1240,11 +1270,12 @@ def _handle_open_message(
         message = get_message(service, target_id, format_type="full")
         message = hydrate_message_text_bodies(service, message)
         message = hydrate_message_text_from_raw(service, message)
-        downloaded = download_message_attachments(service, message, Path.cwd())
+        target_dir = _attachment_download_dir(preset, target_id)
+        downloaded = download_message_attachments(service, message, target_dir)
         response = mark_message_read(service, target_id)
         print(render_message_open(message, my_email, utc_offset=utc_offset))
         if downloaded:
-            print(f"attachments_downloaded={len(downloaded)} cwd={Path.cwd()}")
+            print(f"attachments_downloaded={len(downloaded)} dir={target_dir}")
             for path in downloaded:
                 print(f"attachment: {path.name}")
         print(
@@ -1258,6 +1289,7 @@ def _handle_open_message(
         return 0
 
     all_downloaded: list[Path] = []
+    download_dirs: list[Path] = []
     message_ids: list[str] = []
     for idx, message in enumerate(messages, start=1):
         message = hydrate_message_text_bodies(service, message)
@@ -1265,7 +1297,11 @@ def _handle_open_message(
         message_id = str(message.get("id", "")).strip()
         if message_id:
             message_ids.append(message_id)
-        all_downloaded.extend(download_message_attachments(service, message, Path.cwd()))
+            target_dir = _attachment_download_dir(preset, message_id)
+            downloaded = download_message_attachments(service, message, target_dir)
+            if downloaded:
+                download_dirs.append(target_dir)
+                all_downloaded.extend(downloaded)
         print(f"[{idx}/{len(messages)}]")
         print(render_message_open(message, my_email, utc_offset=utc_offset))
         if idx < len(messages):
@@ -1273,7 +1309,9 @@ def _handle_open_message(
 
     marked_read = batch_mark_messages_read(service, message_ids)
     if all_downloaded:
-        print(f"attachments_downloaded={len(all_downloaded)} cwd={Path.cwd()}")
+        print(f"attachments_downloaded={len(all_downloaded)} dirs={len(download_dirs)}")
+        for directory in download_dirs:
+            print(f"attachment_dir: {directory}")
         for path in all_downloaded:
             print(f"attachment: {path.name}")
     print(
@@ -1532,7 +1570,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "o":
         return _handle_open_message(
-            service, args.params, account.email, utc_offset=config.timezone_offset
+            service, args.params, account.email, account.preset, utc_offset=config.timezone_offset
         )
 
     if command == "mr":

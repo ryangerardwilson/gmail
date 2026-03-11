@@ -75,7 +75,10 @@ class MainCommandTests(unittest.TestCase):
         self.assertIn("Gmail CLI", output)
         self.assertIn("features:", output)
         self.assertIn("send a new email, with optional editor mode, cc, bcc, and attachments", output)
-        self.assertIn("# <preset> ls <query>|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...", output)
+        self.assertIn(
+            "# <preset> ls [limit] [-f <from>] [-c <contains>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
+            output,
+        )
         self.assertIn("gmail 1 ls -ur", output)
         self.assertNotIn("commands:", output)
         self.assertNotIn("usage:", output)
@@ -369,7 +372,7 @@ class MainCommandTests(unittest.TestCase):
         ):
             code = _handle_list(service, ["-ur"], default_limit=10, my_email="me@example.com")
         self.assertEqual(code, 0)
-        list_messages_mock.assert_called_once_with(service, "is:unread")
+        list_messages_mock.assert_called_once_with(service, "is:unread -in:sent")
 
     def test_handle_list_unread_custom_limit(self) -> None:
         service = MagicMock()
@@ -377,7 +380,7 @@ class MainCommandTests(unittest.TestCase):
             "main.render_messages_table", return_value="table"
         ):
             _handle_list(service, ["-ur", "1"], default_limit=10, my_email="me@example.com")
-        list_messages_mock.assert_called_once_with(service, "is:unread", 1)
+        list_messages_mock.assert_called_once_with(service, "is:unread -in:sent", 1)
 
     def test_handle_list_unread_bad_limit(self) -> None:
         service = MagicMock()
@@ -391,7 +394,7 @@ class MainCommandTests(unittest.TestCase):
         ):
             code = _handle_list(service, ["-r"], default_limit=10, my_email="me@example.com")
         self.assertEqual(code, 0)
-        list_messages_mock.assert_called_once_with(service, "is:read -from:me@example.com")
+        list_messages_mock.assert_called_once_with(service, "is:read -in:sent")
 
     def test_handle_list_read_custom_limit(self) -> None:
         service = MagicMock()
@@ -399,7 +402,7 @@ class MainCommandTests(unittest.TestCase):
             "main.render_messages_table", return_value="table"
         ):
             _handle_list(service, ["-r", "1"], default_limit=10, my_email="me@example.com")
-        list_messages_mock.assert_called_once_with(service, "is:read -from:me@example.com", 1)
+        list_messages_mock.assert_called_once_with(service, "is:read -in:sent", 1)
 
     def test_handle_list_starred_default_limit(self) -> None:
         service = MagicMock()
@@ -408,7 +411,7 @@ class MainCommandTests(unittest.TestCase):
         ):
             code = _handle_list(service, ["-str"], default_limit=10, my_email="me@example.com")
         self.assertEqual(code, 0)
-        list_messages_mock.assert_called_once_with(service, "is:starred")
+        list_messages_mock.assert_called_once_with(service, "is:starred -in:sent")
 
     def test_handle_list_starred_custom_limit(self) -> None:
         service = MagicMock()
@@ -416,7 +419,7 @@ class MainCommandTests(unittest.TestCase):
             "main.render_messages_table", return_value="table"
         ):
             _handle_list(service, ["-str", "3"], default_limit=10, my_email="me@example.com")
-        list_messages_mock.assert_called_once_with(service, "is:starred", 3)
+        list_messages_mock.assert_called_once_with(service, "is:starred -in:sent", 3)
 
     def test_handle_list_external_limit(self) -> None:
         service = MagicMock()
@@ -426,7 +429,7 @@ class MainCommandTests(unittest.TestCase):
             code = _handle_list(service, ["-ext", "10"], default_limit=10, my_email="me@example.com")
         self.assertEqual(code, 0)
         list_messages_mock.assert_called_once_with(
-            service, "-from:me@example.com -from:*@example.com", 10
+            service, "-from:me@example.com -in:sent -from:*@example.com", 10
         )
 
     def test_handle_list_sent_default_limit(self) -> None:
@@ -446,15 +449,21 @@ class MainCommandTests(unittest.TestCase):
             _handle_list(service, ["-snt", "10"], default_limit=5, my_email="me@example.com")
         list_messages_mock.assert_called_once_with(service, "in:sent", 10)
 
-    def test_handle_list_sent_query(self) -> None:
+    def test_handle_list_sent_contains_filter(self) -> None:
         service = MagicMock()
-        with patch("main.parse_declarative_query") as parse_mock, patch(
-            "main.list_messages", return_value=[]
-        ) as list_messages_mock, patch("main.render_messages_table", return_value="table"):
-            parse_mock.return_value = MagicMock(gmail_query="in:sent silvia", max_results=7)
-            _handle_list(service, ["-snt", "silvia"], default_limit=5, my_email="me@example.com")
-        parse_mock.assert_called_once_with("in:sent silvia", 5)
-        list_messages_mock.assert_called_once_with(service, "in:sent silvia", 7)
+        with patch("main.list_messages", return_value=[]) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            _handle_list(service, ["-snt", "-c", "silvia"], default_limit=5, my_email="me@example.com")
+        list_messages_mock.assert_called_once_with(service, "in:sent silvia", 5)
+
+    def test_handle_list_limit_only(self) -> None:
+        service = MagicMock()
+        with patch("main.list_messages", return_value=[]) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            _handle_list(service, ["10"], default_limit=5, my_email="me@example.com")
+        list_messages_mock.assert_called_once_with(service, "-in:sent", 10)
 
     def test_handle_list_open_mode_prints_bodies_and_marks_read(self) -> None:
         service = MagicMock()
@@ -471,30 +480,27 @@ class MainCommandTests(unittest.TestCase):
                 my_email="me@example.com",
             )
         self.assertEqual(code, 0)
-        list_messages_mock.assert_called_once_with(service, "is:unread", 2)
+        list_messages_mock.assert_called_once_with(service, "is:unread -in:sent", 2)
         render_table_mock.assert_not_called()
         self.assertEqual(render_open_mock.call_count, 2)
         mark_batch_mock.assert_called_once_with(service, ["m1", "m2"])
 
-    def test_handle_list_open_mode_with_query(self) -> None:
+    def test_handle_list_open_mode_with_from_filter(self) -> None:
         service = MagicMock()
         messages = [{"id": "m1"}]
-        with patch(
-            "main.parse_declarative_query",
-            return_value=MagicMock(gmail_query="from:xyz", max_results=1),
-        ) as parse_mock, patch("main.list_messages", return_value=messages), patch(
+        with patch("main.list_messages", return_value=messages) as list_messages_mock, patch(
             "main.render_messages_table", return_value="table"
         ) as render_table_mock, patch("main.render_message_open", return_value="opened"), patch(
             "main.batch_mark_messages_read", return_value=1
         ) as mark_batch_mock:
             code = _handle_list(
                 service,
-                ["from", "xyz", "limit", "1", "-o"],
+                ["-f", "xyz", "1", "-o"],
                 default_limit=10,
                 my_email="me@example.com",
             )
         self.assertEqual(code, 0)
-        parse_mock.assert_called_once_with("from xyz limit 1", 10)
+        list_messages_mock.assert_called_once_with(service, "-in:sent from:xyz", 1)
         render_table_mock.assert_not_called()
         mark_batch_mock.assert_called_once_with(service, ["m1"])
 
@@ -530,11 +536,11 @@ class MainCommandTests(unittest.TestCase):
         ) as dl_mock, patch(
             "main.mark_message_read", return_value={"id": "m1", "threadId": "t1"}
         ) as mark_mock, patch("main.render_message_open", return_value="opened"):
-            code = _handle_open_message(service, ["m1"], "me@example.com")
+            code = _handle_open_message(service, ["m1"], "me@example.com", "1")
         self.assertEqual(code, 0)
         hydrate_mock.assert_called_once()
         hydrate_raw_mock.assert_called_once()
-        dl_mock.assert_called_once()
+        dl_mock.assert_called_once_with(service, {"id": "m1", "threadId": "t1"}, Path.cwd() / "atch_1_m1")
         mark_mock.assert_called_once_with(service, "m1")
 
     def test_handle_open_thread(self) -> None:
@@ -553,11 +559,17 @@ class MainCommandTests(unittest.TestCase):
         ) as mark_batch_mock, patch(
             "main.render_message_open", return_value="opened"
         ):
-            code = _handle_open_message(service, ["-t", "t1"], "me@example.com")
+            code = _handle_open_message(service, ["-t", "t1"], "me@example.com", "1")
         self.assertEqual(code, 0)
         self.assertEqual(hydrate_mock.call_count, 2)
         self.assertEqual(hydrate_raw_mock.call_count, 2)
-        self.assertEqual(dl_mock.call_count, 2)
+        self.assertEqual(
+            dl_mock.call_args_list,
+            [
+                unittest.mock.call(service, {"id": "m1", "threadId": "t1"}, Path.cwd() / "atch_1_m1"),
+                unittest.mock.call(service, {"id": "m2", "threadId": "t1"}, Path.cwd() / "atch_1_m2"),
+            ],
+        )
         mark_batch_mock.assert_called_once_with(service, ["m1", "m2"])
 
     def test_handle_mark_unread(self) -> None:
@@ -822,7 +834,12 @@ class MainCommandTests(unittest.TestCase):
                 account=account,
             )
         self.assertEqual(code, 0)
-        list_page_mock.assert_called_once_with(service, "is:unread", max_results=10, page_token=None)
+        list_page_mock.assert_called_once_with(
+            service,
+            "is:unread -in:sent",
+            max_results=10,
+            page_token=None,
+        )
 
     def test_handle_list_unread_audit_trash_only(self) -> None:
         service = MagicMock()
@@ -925,7 +942,7 @@ class MainCommandTests(unittest.TestCase):
                 account=account,
             )
         self.assertEqual(code, 0)
-        list_messages_mock.assert_called_once_with(service, "is:read", 5)
+        list_messages_mock.assert_called_once_with(service, "is:read -in:sent", 5)
 
 
 if __name__ == "__main__":

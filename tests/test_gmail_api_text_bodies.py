@@ -1,8 +1,14 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock
 import base64
 
-from gmail_cli.gmail_api import hydrate_message_text_bodies, hydrate_message_text_from_raw
+from gmail_cli.gmail_api import (
+    download_message_attachments,
+    hydrate_message_text_bodies,
+    hydrate_message_text_from_raw,
+)
 
 
 class GmailApiTextBodiesTests(unittest.TestCase):
@@ -72,6 +78,37 @@ class GmailApiTextBodiesTests(unittest.TestCase):
         hydrated = hydrate_message_text_from_raw(service, message)
         self.assertEqual(hydrated["_raw_plain_body"].strip(), "plain text")
         self.assertIn("<p>html text</p>", hydrated["_raw_html_body"])
+
+    def test_download_message_attachments_skips_ics_files(self) -> None:
+        service = MagicMock()
+        attachments_api = service.users.return_value.messages.return_value.attachments.return_value
+        attachments_api.get.return_value.execute.return_value = {"data": "aGVsbG8"}
+        message = {
+            "id": "m1",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "parts": [
+                    {
+                        "filename": "invite.ics",
+                        "body": {"attachmentId": "att-ics"},
+                    },
+                    {
+                        "filename": "notes.txt",
+                        "body": {"attachmentId": "att-txt"},
+                    },
+                    {
+                        "filename": "MEETING.ICS",
+                        "body": {"data": "aGVsbG8"},
+                    },
+                ],
+            },
+        }
+
+        with TemporaryDirectory() as tmp_dir:
+            downloaded = download_message_attachments(service, message, Path(tmp_dir))
+
+        self.assertEqual(downloaded, [Path(tmp_dir) / "notes.txt"])
+        attachments_api.get.assert_called_once_with(userId="me", messageId="m1", id="att-txt")
 
 
 if __name__ == "__main__":

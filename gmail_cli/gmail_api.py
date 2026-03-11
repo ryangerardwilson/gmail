@@ -417,6 +417,10 @@ def _unique_attachment_path(target_dir: Path, filename: str) -> Path:
         index += 1
 
 
+def _should_skip_downloaded_attachment(filename: str) -> bool:
+    return Path(filename).suffix.lower() == ".ics"
+
+
 def download_message_attachments(
     service,
     message: dict[str, Any],
@@ -436,6 +440,8 @@ def download_message_attachments(
     target_dir.mkdir(parents=True, exist_ok=True)
     downloaded: list[Path] = []
     for filename, attachment_id, inline_data in attachment_specs:
+        if _should_skip_downloaded_attachment(filename):
+            continue
         if attachment_id:
             try:
                 response = (

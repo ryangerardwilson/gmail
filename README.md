@@ -110,7 +110,7 @@ gmail <preset> mustr <message_id>
 gmail <preset> d <message_id>
 gmail <preset> ms <message_id>
 gmail <preset> s -e
-gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
+gmail <preset> s <to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 gmail <preset> ls [-o] [limit] [-f <from>] [-c <contains>]
 gmail <preset> ls [-o] -ur [limit]
 gmail <preset> ls [-o] -r [limit]
@@ -120,8 +120,8 @@ gmail <preset> ls [-o] -snt [limit] [-f <from>] [-c <contains>]
 gmail <preset> ls -ura [limit]
 gmail <preset> ls -ra [limit]
 gmail <preset> ls [-o] -t <thread_id>
-gmail <preset> r [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
-gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
+gmail <preset> r [-a] [-e] <message_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
+gmail <preset> r [-a] [-e] -t <thread_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 ```
 
 Help behavior:
@@ -135,6 +135,7 @@ Examples:
 gmail auth ~/Documents/credentials/client_secret.json
 gmail 1 s -e
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body"
+gmail 1 s "xyz@example.com" "this is the subject" -dp "/tmp/draft.txt"
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -cc "cc1@example.com,cc2@example.com" -bcc "audit@example.com"
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt"
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt" "/tmp/project_dir"
@@ -173,6 +174,7 @@ gmail 1 ms "18f3abc..."
 
 # Reply
 gmail 1 r "18f3abc..." "Thanks, sharing this now."
+gmail 1 r "18f3abc..." -dp "/tmp/reply.txt"
 gmail 1 r -e "18f3abc..."
 gmail 1 r -a "18f3abc..." "Thanks everyone."
 gmail 1 r "18f3abc..." "Adding context." -cc "manager@example.com" -bcc "audit@example.com"
@@ -206,6 +208,7 @@ Reply flags:
 - `-cc`: add comma-separated recipients to Cc for send/reply (trailing option, after required args).
 - `-bcc`: add comma-separated recipients to Bcc for send/reply (trailing option, after required args).
 - `-atch`: attach one or more file/dir paths; directories are attached as generated `.zip` files (trailing option, after required args).
+- `-dp`: read the send/reply body from a local draft file (trailing option, mutually exclusive with inline body).
 - `s -e`: open your editor (`$VISUAL`, then `$EDITOR`, else `vim`) with a compose template and send from filled fields.
 - `r -e`: open your editor for reply body/CC/BCC/Attachments (target id stays on CLI). Works with separate `-a` and/or `-t` flags.
 - Editor template supports `Attachments: "path1,path2,path3"` (comma-separated file/dir paths).

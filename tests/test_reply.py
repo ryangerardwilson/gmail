@@ -55,6 +55,31 @@ class ReplyParsingTests(unittest.TestCase):
         self.assertEqual(bcc_emails, [])
         self.assertEqual(attachment_paths, [])
 
+    def test_parse_reply_args_with_draft_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            draft_path = Path(tmpdir) / "reply.txt"
+            draft_path.write_text("Line 1\n\nLine 2\n", encoding="utf-8")
+
+            use_thread, reply_all, use_editor, target_id, body, cc_emails, bcc_emails, attachment_paths = _parse_reply_args(
+                ["msg123", "-dp", str(draft_path)]
+            )
+
+        self.assertFalse(use_thread)
+        self.assertFalse(reply_all)
+        self.assertFalse(use_editor)
+        self.assertEqual(target_id, "msg123")
+        self.assertEqual(body, "Line 1\n\nLine 2")
+        self.assertEqual(cc_emails, [])
+        self.assertEqual(bcc_emails, [])
+        self.assertEqual(attachment_paths, [])
+
+    def test_parse_reply_args_rejects_body_with_draft_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            draft_path = Path(tmpdir) / "reply.txt"
+            draft_path.write_text("Body", encoding="utf-8")
+            with self.assertRaises(UsageError):
+                _parse_reply_args(["msg123", "hello", "-dp", str(draft_path)])
+
     def test_parse_reply_args_invalid_flag(self) -> None:
         with self.assertRaises(UsageError):
             _parse_reply_args(["-x", "id", "body"])
@@ -101,6 +126,29 @@ class SendParsingTests(unittest.TestCase):
         self.assertEqual(cc_emails, ["a@example.com", "b@example.com"])
         self.assertEqual(bcc_emails, ["hidden@example.com"])
         self.assertEqual([str(path) for path in attachment_paths], [str(Path("/tmp")), str(Path("/tmp"))])
+
+    def test_parse_send_args_with_draft_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            draft_path = Path(tmpdir) / "draft.txt"
+            draft_path.write_text("Hello\n\nWorld\n", encoding="utf-8")
+
+            to_email, subject, body, cc_emails, bcc_emails, attachment_paths = _parse_send_args(
+                ["to@example.com", "Hi", "-dp", str(draft_path)]
+            )
+
+        self.assertEqual(to_email, "to@example.com")
+        self.assertEqual(subject, "Hi")
+        self.assertEqual(body, "Hello\n\nWorld")
+        self.assertEqual(cc_emails, [])
+        self.assertEqual(bcc_emails, [])
+        self.assertEqual(attachment_paths, [])
+
+    def test_parse_send_args_rejects_body_with_draft_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            draft_path = Path(tmpdir) / "draft.txt"
+            draft_path.write_text("Body", encoding="utf-8")
+            with self.assertRaises(UsageError):
+                _parse_send_args(["to@example.com", "Hi", "Body", "-dp", str(draft_path)])
 
     def test_parse_send_args_rejects_non_trailing_options(self) -> None:
         with self.assertRaises(UsageError):

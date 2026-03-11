@@ -53,7 +53,7 @@ from gmail_cli.spam_flow import (
     run_identify_for_account,
 )
 
-_TRAILING_OPTIONS = {"-cc", "-bcc", "-atch"}
+_TRAILING_OPTIONS = {"-cc", "-bcc", "-atch", "-dp"}
 ANSI_RESET = "\033[0m"
 ANSI_GRAY = "\033[38;5;245m"
 GLOBAL_COMMANDS = {"conf", "sc", "ti", "td", "st"}
@@ -96,7 +96,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> d <message_id>\n"
             "gmail <preset> ms <message_id>\n"
             "gmail <preset> s -e\n"
-            "gmail <preset> s <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
+            "gmail <preset> s <to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "gmail <preset> ls [-o] [limit] [-f <from>] [-c <contains>]\n"
             "gmail <preset> ls [-o] -ur [limit]\n"
             "gmail <preset> ls [-o] -r [limit]\n"
@@ -106,8 +106,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> ls -ura [limit]\n"
             "gmail <preset> ls -ra [limit]\n"
             "gmail <preset> ls [-o] -t <thread_id>\n"
-            "gmail <preset> r [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
-            "gmail <preset> r [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
+            "gmail <preset> r [-a] [-e] <message_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
+            "gmail <preset> r [-a] [-e] -t <thread_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
         ),
     )
     parser.add_argument(
@@ -154,9 +154,10 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail auth ~/Documents/credentials/client_secret.json",
                 "",
                 "  send a new email, with optional editor mode, cc, bcc, and attachments",
-                "  # <preset> s [-e]|<to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> ...]",
+                "  # <preset> s [-e]|<to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> ...]",
                 "  gmail 1 s -e",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\"",
+                "  gmail 1 s \"xyz@example.com\" \"Hello\" -dp \"/tmp/draft.txt\"",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -cc \"cc1@example.com,cc2@example.com\" -bcc \"audit@example.com\"",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\"",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
@@ -195,8 +196,9 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 ms \"19caef2cd6494116\"",
                 "",
                 "  reply to a message or thread, with optional reply-all and editor mode",
-                "  # <preset> r [-a] [-e] <message_id|thread_id> <body>",
+                "  # <preset> r [-a] [-e] <message_id|thread_id> <body>|-dp <draft_path>",
                 "  gmail 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
+                "  gmail 1 r \"19caef2cd6494116\" -dp \"/tmp/reply.txt\"",
                 "  gmail 1 r -e \"19caef2cd6494116\"",
                 "  gmail 1 r -a \"19caef2cd6494116\" \"Thanks all.\"",
                 "  gmail 1 r \"19caef2cd6494116\" \"Adding context.\" -cc \"manager@example.com\"",
@@ -258,6 +260,23 @@ def _parse_attachment_csv_optional(value: str) -> list[Path]:
     if not raw_items:
         return []
     return [_parse_attachment_path(item) for item in raw_items]
+
+
+def _parse_draft_path(value: str) -> Path:
+    draft_path = Path(value).expanduser()
+    if not draft_path.exists() or not draft_path.is_file():
+        raise UsageError(f"-dp requires a readable draft file path: {value}")
+    return draft_path
+
+
+def _read_draft_body(path: Path) -> str:
+    try:
+        body = path.read_text(encoding="utf-8").rstrip()
+    except OSError as exc:
+        raise UsageError(f"Could not read draft file '{path}': {exc}") from exc
+    if not body:
+        raise UsageError(f"Draft file is empty: {path}")
+    return body
 
 
 def _compose_editor_template(from_email: str, signature: str, include_to_subject: bool) -> str:
@@ -411,16 +430,23 @@ def _consume_attachment_paths(tokens: list[str], start_index: int) -> tuple[list
 def _parse_send_args(
     params: list[str],
 ) -> tuple[str, str, str, list[str], list[str], list[Path]]:
-    if len(params) < 3:
+    if len(params) < 2:
         raise UsageError(
-            "Send requires: <to> <subject> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
+            "Send requires: <to> <subject> <body> or <to> <subject> -dp <draft_path> "
+            "[-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
         )
 
-    to_email, subject, body = params[:3]
-    trailing = params[3:]
+    to_email, subject = params[:2]
+    body = ""
+    trailing_start = 2
+    if len(params) > 2 and params[2] not in _TRAILING_OPTIONS:
+        body = params[2]
+        trailing_start = 3
+    trailing = params[trailing_start:]
     cc_emails: list[str] = []
     bcc_emails: list[str] = []
     attachment_paths: list[Path] = []
+    draft_path: Path | None = None
     index = 0
     while index < len(trailing):
         token = trailing[index]
@@ -428,11 +454,20 @@ def _parse_send_args(
             if index + 1 >= len(trailing):
                 if token == "-atch":
                     raise UsageError("-atch requires a path to a file or directory")
+                if token == "-dp":
+                    raise UsageError("-dp requires a path to a draft file")
                 raise UsageError(f"{token} requires a comma-separated email list")
             if token == "-atch":
                 parsed_paths, next_index = _consume_attachment_paths(trailing, index + 1)
                 attachment_paths.extend(parsed_paths)
                 index = next_index
+            elif token == "-dp":
+                if body:
+                    raise UsageError("Use either <body> or -dp <draft_path>, not both")
+                if draft_path is not None:
+                    raise UsageError("-dp may only be provided once")
+                draft_path = _parse_draft_path(trailing[index + 1])
+                index += 2
             else:
                 parsed = _parse_recipient_csv(trailing[index + 1], token)
                 if token == "-cc":
@@ -442,8 +477,13 @@ def _parse_send_args(
                 index += 2
             continue
         raise UsageError(
-            "Send options must appear at the end. Supported trailing options: -cc, -bcc, -atch"
+            "Send options must appear at the end. Supported trailing options: -cc, -bcc, -atch, -dp"
         )
+
+    if draft_path is not None:
+        body = _read_draft_body(draft_path)
+    if not body:
+        raise UsageError("Send requires <body> or -dp <draft_path> before trailing options")
 
     return to_email, subject, body, cc_emails, bcc_emails, attachment_paths
 
@@ -847,8 +887,10 @@ def _parse_reply_args(
 ) -> tuple[bool, bool, bool, str, str, list[str], list[str], list[Path]]:
     if not params:
         raise UsageError(
-            "Reply requires: [-a] [-e] <message_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]] "
-            "or [-a] [-e] -t <thread_id> <body> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
+            "Reply requires: [-a] [-e] <message_id> <body> or [-a] [-e] <message_id> -dp <draft_path> "
+            "[-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]] or "
+            "[-a] [-e] -t <thread_id> <body> or [-a] [-e] -t <thread_id> -dp <draft_path> "
+            "[-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
         )
 
     flags: set[str] = set()
@@ -869,7 +911,7 @@ def _parse_reply_args(
         if token in _TRAILING_OPTIONS:
             break
         raise UsageError(
-            f"Unknown reply option '{token}'. Supported: -a, -t, -e, -cc, -bcc, -atch"
+            f"Unknown reply option '{token}'. Supported: -a, -t, -e, -cc, -bcc, -atch, -dp"
         )
 
     remaining = params[index:]
@@ -878,19 +920,21 @@ def _parse_reply_args(
     minimum_required = 1 if use_editor else 2
     if len(remaining) < minimum_required:
         raise UsageError(
-            f"Reply requires: <{target_name}> {'<body> ' if not use_editor else ''}before trailing options"
+            f"Reply requires: <{target_name}> {'<body> or -dp <draft_path> ' if not use_editor else ''}before trailing options"
         )
 
     target_id = remaining[0]
     body = ""
     trailing_start = 1
     if not use_editor:
-        body = remaining[1]
-        trailing_start = 2
+        if len(remaining) > 1 and remaining[1] not in _TRAILING_OPTIONS:
+            body = remaining[1]
+            trailing_start = 2
     trailing = remaining[trailing_start:]
     cc_emails: list[str] = []
     bcc_emails: list[str] = []
     attachment_paths: list[Path] = []
+    draft_path: Path | None = None
     tail_index = 0
     while tail_index < len(trailing):
         token = trailing[tail_index]
@@ -898,11 +942,20 @@ def _parse_reply_args(
             if tail_index + 1 >= len(trailing):
                 if token == "-atch":
                     raise UsageError("-atch requires a path to a file or directory")
+                if token == "-dp":
+                    raise UsageError("-dp requires a path to a draft file")
                 raise UsageError(f"{token} requires a comma-separated email list")
             if token == "-atch":
                 parsed_paths, next_index = _consume_attachment_paths(trailing, tail_index + 1)
                 attachment_paths.extend(parsed_paths)
                 tail_index = next_index
+            elif token == "-dp":
+                if body:
+                    raise UsageError("Use either <body> or -dp <draft_path>, not both")
+                if draft_path is not None:
+                    raise UsageError("-dp may only be provided once")
+                draft_path = _parse_draft_path(trailing[tail_index + 1])
+                tail_index += 2
             else:
                 parsed = _parse_recipient_csv(trailing[tail_index + 1], token)
                 if token == "-cc":
@@ -912,8 +965,13 @@ def _parse_reply_args(
                 tail_index += 2
             continue
         raise UsageError(
-            "Reply options must appear at the end. Supported trailing options: -cc, -bcc, -atch"
+            "Reply options must appear at the end. Supported trailing options: -cc, -bcc, -atch, -dp"
         )
+
+    if draft_path is not None:
+        body = _read_draft_body(draft_path)
+    if not use_editor and not body:
+        raise UsageError(f"Reply requires <{target_name}> <body> or <{target_name}> -dp <draft_path>")
 
     return "t" in flags, "a" in flags, use_editor, target_id, body, cc_emails, bcc_emails, attachment_paths
 

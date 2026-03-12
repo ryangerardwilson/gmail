@@ -97,12 +97,12 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> ms <message_id>\n"
             "gmail <preset> s -e\n"
             "gmail <preset> s <to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
-            "gmail <preset> ls [-o] [limit] [-f <from>] [-c <contains>]\n"
+            "gmail <preset> ls [-o] [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]\n"
             "gmail <preset> ls [-o] -ur [limit]\n"
             "gmail <preset> ls [-o] -r [limit]\n"
             "gmail <preset> ls [-o] -str [limit]\n"
             "gmail <preset> ls [-o] -ext <limit>\n"
-            "gmail <preset> ls [-o] -snt [limit] [-f <from>] [-c <contains>]\n"
+            "gmail <preset> ls [-o] -snt [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]\n"
             "gmail <preset> ls -ura [limit]\n"
             "gmail <preset> ls -ra [limit]\n"
             "gmail <preset> ls [-o] -t <thread_id>\n"
@@ -163,10 +163,12 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
                 "",
                 "  search, list, open, and audit messages",
-                "  # <preset> ls [limit] [-f <from>] [-c <contains>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
+                "  # <preset> ls [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
                 "  gmail 1 ls 10",
                 "  gmail 1 ls -f xyz@example.com 5",
                 "  gmail 1 ls -c jake 1",
+                "  gmail 1 ls -f geeta -tl 2w 10",
+                "  gmail 1 ls -tl \"jan 2025\" 20",
                 "  gmail 1 ls -ur",
                 "  gmail 1 ls -ur 1",
                 "  gmail 1 ls -r",
@@ -689,7 +691,9 @@ def _handle_list(
 ) -> int:
     open_mode, filtered_params = _extract_list_open_flag(params)
     if not filtered_params:
-        raise UsageError("ls requires [limit], -f <from>, -c <contains>, or a mode flag like -ur")
+        raise UsageError(
+            "ls requires [limit], -f <from>, -c <contains>, -tl <time_limit>, or a mode flag like -ur"
+        )
     if filtered_params[0] in {"-ura", "-ra"} and open_mode:
         raise UsageError("ls -o is not supported with -ura or -ra")
 

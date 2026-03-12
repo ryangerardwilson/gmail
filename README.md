@@ -111,12 +111,12 @@ gmail <preset> d <message_id>
 gmail <preset> ms <message_id>
 gmail <preset> s -e
 gmail <preset> s <to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
-gmail <preset> ls [-o] [limit] [-f <from>] [-c <contains>]
+gmail <preset> ls [-o] [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]
 gmail <preset> ls [-o] -ur [limit]
 gmail <preset> ls [-o] -r [limit]
 gmail <preset> ls [-o] -str [limit]
 gmail <preset> ls [-o] -ext <limit>
-gmail <preset> ls [-o] -snt [limit] [-f <from>] [-c <contains>]
+gmail <preset> ls [-o] -snt [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]
 gmail <preset> ls -ura [limit]
 gmail <preset> ls -ra [limit]
 gmail <preset> ls [-o] -t <thread_id>
@@ -144,6 +144,9 @@ gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp
 gmail 1 ls 10
 gmail 1 ls -f maanas 1
 gmail 1 ls -f xyz 5
+gmail 1 ls -f geeta -tl 2w 10
+gmail 1 ls -tl "jan 2025" 20
+gmail 1 ls -tl 2025-01-10..2025-01-20 20
 gmail 1 ls -ur
 gmail 1 ls -ur 1
 gmail 1 ls -r
@@ -246,7 +249,9 @@ List flags:
 - `ls 10`: list 10 non-sent messages.
 - `ls -f <from> [limit]`: filter by sender.
 - `ls -c <contains> [limit]`: filter by Gmail full-text search term.
-- Combine them as needed, for example: `gmail 1 ls -f xyz@example.com -c invoice 10`.
+- `ls -tl <time_limit> [limit]`: filter by time window or date range.
+- Supported `-tl` forms: `2w`, `14d`, `3m`, `1y`, `2025-01`, `"jan 2025"`, `2025-01-10`, `2025-01-10..2025-01-20`.
+- Combine them as needed, for example: `gmail 1 ls -f xyz@example.com -c invoice -tl 2w 10`.
 - `ls` excludes messages in `Sent`; use `ls -snt ...` to search sent mail.
 - `ls` no longer accepts the old quoted declarative query form.
 
@@ -264,7 +269,7 @@ Message utilities:
 - `ls -r [limit]`: list read received messages only (excludes sent); if `limit` is omitted, uses config default list limit.
 - `ls -str [limit]`: list starred non-sent messages only; if `limit` is omitted, lists all starred non-sent messages.
 - `ls -ext <limit>`: list external-domain messages only (excludes your own sender address and your preset domain).
-- `ls -snt [limit] [-f <from>] [-c <contains>]`: list/search sent messages with the same flag grammar as `ls`.
+- `ls -snt [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]`: list/search sent messages with the same flag grammar as `ls`.
 - `ls -o ...`: prints full body for each listed message and marks listed messages as read.
 - `ls -o` is supported with normal list modes (`<query>`, `-ur`, `-r`, `-ext`, `-snt`, `-t`) and not supported with audit modes (`-ura`, `-ra`).
 - `ls -ura [limit]`: interactive unread audit. Without `limit`, audits all unread messages continuously in batches of 10. For each unread message: `s` marks spam (adds sender to `spam_senders` and trashes message), `t` trashes message without spam-list update, `n` leaves message unread, `q` stops audit.

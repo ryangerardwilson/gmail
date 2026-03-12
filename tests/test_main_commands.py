@@ -76,10 +76,11 @@ class MainCommandTests(unittest.TestCase):
         self.assertIn("features:", output)
         self.assertIn("send a new email, with optional editor mode, cc, bcc, and attachments", output)
         self.assertIn(
-            "# <preset> ls [limit] [-f <from>] [-c <contains>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
+            "# <preset> ls [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
             output,
         )
         self.assertIn("gmail 1 ls -ur", output)
+        self.assertIn('gmail 1 ls -tl "jan 2025" 20', output)
         self.assertNotIn("commands:", output)
         self.assertNotIn("usage:", output)
 
@@ -457,6 +458,18 @@ class MainCommandTests(unittest.TestCase):
             _handle_list(service, ["-snt", "-c", "silvia"], default_limit=5, my_email="me@example.com")
         list_messages_mock.assert_called_once_with(service, "in:sent silvia", 5)
 
+    def test_handle_list_sent_time_limit_filter(self) -> None:
+        service = MagicMock()
+        with patch("main.list_messages", return_value=[]) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            _handle_list(service, ["-snt", "-tl", "jan 2025"], default_limit=5, my_email="me@example.com")
+        list_messages_mock.assert_called_once_with(
+            service,
+            "in:sent after:2024/12/31 before:2025/02/01",
+            5,
+        )
+
     def test_handle_list_limit_only(self) -> None:
         service = MagicMock()
         with patch("main.list_messages", return_value=[]) as list_messages_mock, patch(
@@ -464,6 +477,14 @@ class MainCommandTests(unittest.TestCase):
         ):
             _handle_list(service, ["10"], default_limit=5, my_email="me@example.com")
         list_messages_mock.assert_called_once_with(service, "-in:sent", 10)
+
+    def test_handle_list_time_limit_filter(self) -> None:
+        service = MagicMock()
+        with patch("main.list_messages", return_value=[]) as list_messages_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ):
+            _handle_list(service, ["-f", "geeta", "-tl", "2w"], default_limit=5, my_email="me@example.com")
+        list_messages_mock.assert_called_once_with(service, "-in:sent from:geeta newer_than:14d", 5)
 
     def test_handle_list_open_mode_prints_bodies_and_marks_read(self) -> None:
         service = MagicMock()

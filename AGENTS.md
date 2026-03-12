@@ -28,7 +28,7 @@ using account presets defined in XDG-compliant config.
   - do not keep legacy preset-token fallback logic in the main runtime.
 - CLI interface must support:
   - `python main.py <preset> s <to> <subject> <body>`
-  - `python main.py <preset> ls [limit] [-f <from>] [-c <contains>]`
+  - `python main.py <preset> ls [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]`
   - `python main.py <preset> r <message_id> <body>`
 - Spam cleanup should support both:
   - `python main.py <preset> sc`
@@ -41,6 +41,8 @@ using account presets defined in XDG-compliant config.
   - `python main.py 1 ls 10`
   - `python main.py 1 ls -f maanas 1`
   - `python main.py 1 ls -c invoice 10`
+  - `python main.py 1 ls -f geeta -tl 2w 10`
+  - `python main.py 1 ls -tl "jan 2025" 20`
 
 ## Architecture expectations
 - Keep API boundaries clean:
@@ -87,6 +89,7 @@ Adjust structure if needed, but preserve separation of concerns.
   - optional positional `limit`
   - `-f <from>` sender filter
   - `-c <contains>` Gmail full-text term filter
+  - `-tl <time_limit>` time filter
   - Gmail `q` expression plus `maxResults`
 - Unknown `ls` tokens should fail fast with a short shape error.
 
@@ -123,6 +126,6 @@ Adjust structure if needed, but preserve separation of concerns.
 - Global `sc` runs spam cleanup across all configured presets.
 - `ti` installs one hourly user timer that runs the same global spam cleanup command and sends a success notification through `notify-send`.
 - Config path resolution is XDG-compliant.
-- `ls 10`, `ls -f maanas 1`, and `ls -c invoice 10` work.
+- `ls 10`, `ls -f maanas 1`, `ls -c invoice 10`, `ls -f geeta -tl 2w 10`, and `ls -tl "jan 2025" 20` work.
 - Tests for core parsing/config logic pass locally.
 - README is sufficient for a new user to run first auth and send an email.

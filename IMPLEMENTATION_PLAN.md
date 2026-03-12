@@ -14,7 +14,7 @@
 ## 2. CLI contract (v1)
 - Primary entrypoint:
   - `python main.py <preset> s <to> <subject> <body>`
-- `python main.py <preset> ls [limit] [-f <from>] [-c <contains>]`
+- `python main.py <preset> ls [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]`
   - `python main.py <preset> r <message_id> <body>`
 - Aliases and compatibility:
   - Accept `-s` as alias for `s` if desired.
@@ -23,6 +23,8 @@
   - `python main.py 1 s "xyz@example.com" "this is the subject" "this is the body"`
 - `python main.py 1 ls 10`
 - `python main.py 1 ls -f maanas 1`
+- `python main.py 1 ls -f geeta -tl 2w 10`
+- `python main.py 1 ls -tl "jan 2025" 20`
   - `python main.py 1 r "18f3..." "Thanks, sharing this now."`
 
 ## 3. Project structure
@@ -100,13 +102,16 @@
   - Failure: clear reason and next action.
 
 ### 6.2 List/Search (`ls`)
-- Input: `[limit] [-f <from>] [-c <contains>]`.
+- Input: `[limit] [-f <from>] [-c <contains>] [-tl <time_limit>]`.
 - `ls` parser v1 grammar:
   - one optional positional positive integer for `maxResults`
   - `-f <from>` maps to Gmail `from:<from>`
   - `-c <contains>` maps to a generic Gmail full-text term
+  - `-tl <time_limit>` maps relative or bounded time expressions into Gmail date query terms
 - Conversion to Gmail query:
   - `-f maanas 1` -> Gmail `q="from:maanas"`, `maxResults=1`.
+  - `-f geeta -tl 2w 10` -> Gmail `q="from:geeta newer_than:14d"`, `maxResults=10`.
+  - `-tl "jan 2025" 20` -> Gmail `q="after:2024/12/31 before:2025/02/01"`, `maxResults=20`.
 - API sequence:
   - `users.messages.list(userId="me", q=..., maxResults=...)`
   - For each message id, fetch metadata/snippet via `users.messages.get(format="metadata")`.

@@ -66,6 +66,18 @@ def _muted_text(text: str) -> str:
     return f"{ANSI_GRAY}{text}{ANSI_RESET}"
 
 
+def _comment_help_line(line: str) -> str:
+    if not line:
+        return line
+    stripped = line.lstrip()
+    if stripped == "Gmail CLI":
+        return line
+    if stripped.startswith("#") or stripped.startswith("gmail "):
+        return line
+    indent = line[: len(line) - len(stripped)]
+    return f"{indent}# {stripped}"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Gmail CLI",
@@ -237,7 +249,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 ""
             ]
         )
-    print(_muted_text("\n".join(lines)))
+    print(_muted_text("\n".join(_comment_help_line(line) for line in lines)))
 
 
 def _parse_recipient_csv(value: str, flag: str) -> list[str]:

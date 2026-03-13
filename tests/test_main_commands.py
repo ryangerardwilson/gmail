@@ -74,13 +74,18 @@ class MainCommandTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("Gmail CLI", output)
         self.assertIn("features:", output)
-        self.assertIn("send a new email, with optional editor mode, cc, bcc, and attachments", output)
         self.assertIn(
-            "# <preset> ls [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
+            "send a new email, with optional editor mode, cc, bcc, and attachments; the configured signature is appended automatically",
             output,
         )
+        self.assertIn("edit account config, including signature_file paths used for automatic send/reply signatures", output)
+        self.assertIn(
+            "# <preset> ls [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
+            output,
+        )
+        self.assertIn("gmail 1 ls -wa -l 10", output)
         self.assertIn("gmail 1 ls -ur", output)
-        self.assertIn('gmail 1 ls -tl "jan 2025" 20', output)
+        self.assertIn('gmail 1 ls -tl "jan 2025" -l 20', output)
         self.assertNotIn("commands:", output)
         self.assertNotIn("usage:", output)
 
@@ -380,7 +385,7 @@ class MainCommandTests(unittest.TestCase):
         with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
             "main.render_messages_table", return_value="table"
         ):
-            _handle_list(service, ["-ur", "1"], default_limit=10, my_email="me@example.com")
+            _handle_list(service, ["-ur", "-l", "1"], default_limit=10, my_email="me@example.com")
         list_messages_mock.assert_called_once_with(service, "is:unread -in:sent", 1)
 
     def test_handle_list_unread_bad_limit(self) -> None:
@@ -402,7 +407,7 @@ class MainCommandTests(unittest.TestCase):
         with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
             "main.render_messages_table", return_value="table"
         ):
-            _handle_list(service, ["-r", "1"], default_limit=10, my_email="me@example.com")
+            _handle_list(service, ["-r", "-l", "1"], default_limit=10, my_email="me@example.com")
         list_messages_mock.assert_called_once_with(service, "is:read -in:sent", 1)
 
     def test_handle_list_starred_default_limit(self) -> None:
@@ -419,7 +424,7 @@ class MainCommandTests(unittest.TestCase):
         with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
             "main.render_messages_table", return_value="table"
         ):
-            _handle_list(service, ["-str", "3"], default_limit=10, my_email="me@example.com")
+            _handle_list(service, ["-str", "-l", "3"], default_limit=10, my_email="me@example.com")
         list_messages_mock.assert_called_once_with(service, "is:starred -in:sent", 3)
 
     def test_handle_list_external_limit(self) -> None:
@@ -427,7 +432,7 @@ class MainCommandTests(unittest.TestCase):
         with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
             "main.render_messages_table", return_value="table"
         ):
-            code = _handle_list(service, ["-ext", "10"], default_limit=10, my_email="me@example.com")
+            code = _handle_list(service, ["-ext", "-l", "10"], default_limit=10, my_email="me@example.com")
         self.assertEqual(code, 0)
         list_messages_mock.assert_called_once_with(
             service, "-from:me@example.com -in:sent -from:*@example.com", 10
@@ -447,7 +452,7 @@ class MainCommandTests(unittest.TestCase):
         with patch("main.list_messages", return_value=[] ) as list_messages_mock, patch(
             "main.render_messages_table", return_value="table"
         ):
-            _handle_list(service, ["-snt", "10"], default_limit=5, my_email="me@example.com")
+            _handle_list(service, ["-snt", "-l", "10"], default_limit=5, my_email="me@example.com")
         list_messages_mock.assert_called_once_with(service, "in:sent", 10)
 
     def test_handle_list_sent_contains_filter(self) -> None:
@@ -470,12 +475,44 @@ class MainCommandTests(unittest.TestCase):
             5,
         )
 
+    def test_handle_list_attachment_only_default_limit(self) -> None:
+        service = MagicMock()
+        messages = [
+            {"id": "ics-only", "payload": {"parts": [{"filename": "invite.ics", "body": {"attachmentId": "a1"}}]}},
+            {"id": "pdf", "payload": {"parts": [{"filename": "notes.pdf", "body": {"attachmentId": "a2"}}]}},
+        ]
+        with patch("main.list_messages_page", return_value=(messages, None)) as page_mock, patch(
+            "main.render_messages_table", return_value="table"
+        ) as render_mock:
+            code = _handle_list(service, ["-wa"], default_limit=5, my_email="me@example.com")
+        self.assertEqual(code, 0)
+        page_mock.assert_called_once_with(service, "-in:sent has:attachment", 5, page_token=None)
+        render_mock.assert_called_once_with([messages[1]], "me@example.com", utc_offset="+05:30")
+
+    def test_handle_list_attachment_only_paginates_past_ics_only_messages(self) -> None:
+        service = MagicMock()
+        ics_only = [{"id": "ics-only", "payload": {"parts": [{"filename": "invite.ics", "body": {"attachmentId": "a1"}}]}}]
+        pdf = [{"id": "pdf", "payload": {"parts": [{"filename": "notes.pdf", "body": {"attachmentId": "a2"}}]}}]
+        with patch(
+            "main.list_messages_page",
+            side_effect=[(ics_only, "token-1"), (pdf, None)],
+        ) as page_mock, patch("main.render_messages_table", return_value="table") as render_mock:
+            code = _handle_list(service, ["-wa", "-l", "1"], default_limit=5, my_email="me@example.com")
+        self.assertEqual(code, 0)
+        self.assertEqual(page_mock.call_count, 2)
+        render_mock.assert_called_once_with(pdf, "me@example.com", utc_offset="+05:30")
+
+    def test_handle_list_attachment_only_rejects_audit_mode(self) -> None:
+        service = MagicMock()
+        with self.assertRaises(UsageError):
+            _handle_list(service, ["-wa", "-ura", "-l", "1"], default_limit=10, my_email="me@example.com")
+
     def test_handle_list_limit_only(self) -> None:
         service = MagicMock()
         with patch("main.list_messages", return_value=[]) as list_messages_mock, patch(
             "main.render_messages_table", return_value="table"
         ):
-            _handle_list(service, ["10"], default_limit=5, my_email="me@example.com")
+            _handle_list(service, ["-l", "10"], default_limit=5, my_email="me@example.com")
         list_messages_mock.assert_called_once_with(service, "-in:sent", 10)
 
     def test_handle_list_time_limit_filter(self) -> None:
@@ -496,7 +533,7 @@ class MainCommandTests(unittest.TestCase):
         ) as mark_batch_mock:
             code = _handle_list(
                 service,
-                ["-o", "-ur", "2"],
+                ["-o", "-ur", "-l", "2"],
                 default_limit=10,
                 my_email="me@example.com",
             )
@@ -516,7 +553,7 @@ class MainCommandTests(unittest.TestCase):
         ) as mark_batch_mock:
             code = _handle_list(
                 service,
-                ["-f", "xyz", "1", "-o"],
+                ["-f", "xyz", "-l", "1", "-o"],
                 default_limit=10,
                 my_email="me@example.com",
             )
@@ -528,7 +565,7 @@ class MainCommandTests(unittest.TestCase):
     def test_handle_list_open_mode_rejects_audit_flags(self) -> None:
         service = MagicMock()
         with self.assertRaises(UsageError):
-            _handle_list(service, ["-o", "-ura", "1"], default_limit=10, my_email="me@example.com")
+            _handle_list(service, ["-o", "-ura", "-l", "1"], default_limit=10, my_email="me@example.com")
 
     def test_handle_mark_read(self) -> None:
         service = MagicMock()
@@ -791,7 +828,14 @@ class MainCommandTests(unittest.TestCase):
     def test_handle_list_unread_audit_bad_limit(self) -> None:
         service = MagicMock()
         with self.assertRaises(UsageError):
-            _handle_list(service, ["-ura", "0"], default_limit=10, my_email="me@example.com", config_path="/tmp/x", account=MagicMock())
+            _handle_list(
+                service,
+                ["-ura", "-l", "0"],
+                default_limit=10,
+                my_email="me@example.com",
+                config_path="/tmp/x",
+                account=MagicMock(),
+            )
 
     def test_handle_list_unread_audit_spam_path(self) -> None:
         service = MagicMock()
@@ -823,7 +867,7 @@ class MainCommandTests(unittest.TestCase):
         ) as update_mock:
             code = _handle_list(
                 service,
-                ["-ura", "1"],
+                ["-ura", "-l", "1"],
                 default_limit=10,
                 my_email="me@example.com",
                 config_path="/tmp/config.json",
@@ -892,7 +936,7 @@ class MainCommandTests(unittest.TestCase):
         ) as update_mock:
             code = _handle_list(
                 service,
-                ["-ura", "1"],
+                ["-ura", "-l", "1"],
                 default_limit=10,
                 my_email="me@example.com",
                 config_path="/tmp/config.json",
@@ -933,7 +977,7 @@ class MainCommandTests(unittest.TestCase):
         ) as update_mock:
             code = _handle_list(
                 service,
-                ["-ura", "1"],
+                ["-ura", "-l", "1"],
                 default_limit=10,
                 my_email="me@example.com",
                 config_path="/tmp/config.json",
@@ -956,7 +1000,7 @@ class MainCommandTests(unittest.TestCase):
         with patch("main.list_messages", return_value=[] ) as list_messages_mock:
             code = _handle_list(
                 service,
-                ["-ra", "5"],
+                ["-ra", "-l", "5"],
                 default_limit=10,
                 my_email="me@example.com",
                 config_path="/tmp/config.json",

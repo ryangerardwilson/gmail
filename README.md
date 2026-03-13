@@ -77,6 +77,7 @@ Notes:
 - The CLI auto-creates the token data directory when needed.
 - Normal app runs only use account-keyed tokens. Legacy preset-number token names are not read implicitly.
 - `signature_file` is required for each account and is appended automatically to all outgoing send/reply bodies.
+- `gmail conf` opens this config file so you can edit `signature_file` and other preset settings.
 - `defaults.timezone_offset` controls displayed message timestamps in output (`±HH:MM`, for example `+05:30` or `-07:00`).
 - `sc`, `ti`, `td`, and `st` are global maintenance commands that act across all configured presets.
 
@@ -111,14 +112,14 @@ gmail <preset> d <message_id>
 gmail <preset> ms <message_id>
 gmail <preset> s -e
 gmail <preset> s <to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
-gmail <preset> ls [-o] [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]
-gmail <preset> ls [-o] -ur [limit]
-gmail <preset> ls [-o] -r [limit]
-gmail <preset> ls [-o] -str [limit]
-gmail <preset> ls [-o] -ext <limit>
-gmail <preset> ls [-o] -snt [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]
-gmail <preset> ls -ura [limit]
-gmail <preset> ls -ra [limit]
+gmail <preset> ls [-o] [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]
+gmail <preset> ls [-o] -ur [-l <limit>]
+gmail <preset> ls [-o] -r [-l <limit>]
+gmail <preset> ls [-o] -str [-l <limit>]
+gmail <preset> ls [-o] -ext [-l <limit>]
+gmail <preset> ls [-o] -snt [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]
+gmail <preset> ls -ura [-l <limit>]
+gmail <preset> ls -ra [-l <limit>]
 gmail <preset> ls [-o] -t <thread_id>
 gmail <preset> r [-a] [-e] <message_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
 gmail <preset> r [-a] [-e] -t <thread_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]
@@ -141,27 +142,29 @@ gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt" "/tmp/project_dir"
 
 # List and audit messages
-gmail 1 ls 10
-gmail 1 ls -f maanas 1
-gmail 1 ls -f xyz 5
-gmail 1 ls -f geeta -tl 2w 10
-gmail 1 ls -tl "jan 2025" 20
-gmail 1 ls -tl 2025-01-10..2025-01-20 20
+gmail 1 ls -l 10
+gmail 1 ls -wa -l 10
+gmail 1 ls -wa -f geeta -tl 2w -l 10
+gmail 1 ls -f maanas -l 1
+gmail 1 ls -f xyz -l 5
+gmail 1 ls -f geeta -tl 2w -l 10
+gmail 1 ls -tl "jan 2025" -l 20
+gmail 1 ls -tl 2025-01-10..2025-01-20 -l 20
 gmail 1 ls -ur
-gmail 1 ls -ur 1
+gmail 1 ls -ur -l 1
 gmail 1 ls -r
-gmail 1 ls -r 1
+gmail 1 ls -r -l 1
 gmail 1 ls -str
-gmail 1 ls -str 5
-gmail 1 ls -ext 10
-gmail 1 ls -snt 10
-gmail 1 ls -snt -c silvia 10
-gmail 1 ls -o -f xyz 1
-gmail 1 ls -o -ur 1
+gmail 1 ls -str -l 5
+gmail 1 ls -ext -l 10
+gmail 1 ls -snt -l 10
+gmail 1 ls -snt -c silvia -l 10
+gmail 1 ls -o -f xyz -l 1
+gmail 1 ls -o -ur -l 1
 # Audit unread emails
-gmail 1 ls -ura 10
+gmail 1 ls -ura -l 10
 # Audit read emails
-gmail 1 ls -ra 10
+gmail 1 ls -ra -l 10
 gmail 1 ls -t "19ca756c06a7ebcd"
 
 # Single-message utilities
@@ -215,6 +218,7 @@ Reply flags:
 - `s -e`: open your editor (`$VISUAL`, then `$EDITOR`, else `vim`) with a compose template and send from filled fields.
 - `r -e`: open your editor for reply body/CC/BCC/Attachments (target id stays on CLI). Works with separate `-a` and/or `-t` flags.
 - Editor template supports `Attachments: "path1,path2,path3"` (comma-separated file/dir paths).
+- Send and reply always append the configured `signature_file` content automatically, so do not add a second manual signature unless you want both.
 
 Spam flow commands:
 - `si` (spam identify): scans unread non-`@gmail.com` messages and counts sender occurrences, then lists senders with more than 5 unread mails and (on confirm) adds them to `spam_senders`.
@@ -246,12 +250,14 @@ Bash completion:
 - For `gmail <preset> s <TAB>`, completions include that preset's contact aliases.
 
 List flags:
-- `ls 10`: list 10 non-sent messages.
-- `ls -f <from> [limit]`: filter by sender.
-- `ls -c <contains> [limit]`: filter by Gmail full-text search term.
-- `ls -tl <time_limit> [limit]`: filter by time window or date range.
+- `ls -l <limit>`: set the result limit explicitly.
+- `ls -wa [-l <limit>]`: list only messages with downloadable attachments.
+- `-wa` excludes messages whose only attachments are `.ics` calendar invite files.
+- `ls -f <from> [-l <limit>]`: filter by sender.
+- `ls -c <contains> [-l <limit>]`: filter by Gmail full-text search term.
+- `ls -tl <time_limit> [-l <limit>]`: filter by time window or date range.
 - Supported `-tl` forms: `2w`, `14d`, `3m`, `1y`, `2025-01`, `"jan 2025"`, `2025-01-10`, `2025-01-10..2025-01-20`.
-- Combine them as needed, for example: `gmail 1 ls -f xyz@example.com -c invoice -tl 2w 10`.
+- Combine them as needed, for example: `gmail 1 ls -wa -f xyz@example.com -c invoice -tl 2w -l 10`.
 - `ls` excludes messages in `Sent`; use `ls -snt ...` to search sent mail.
 - `ls` no longer accepts the old quoted declarative query form.
 
@@ -265,15 +271,15 @@ Message utilities:
 - `mustr <message_id>`: remove star from a single message.
 - `d <message_id>`: delete a single message.
 - `ms <message_id>`: mark sender as spam (adds sender to `spam_senders` subject to safety normalization) and trashes the message.
-- `ls -ur [limit]`: list unread messages only; if `limit` is omitted, uses config default list limit.
-- `ls -r [limit]`: list read received messages only (excludes sent); if `limit` is omitted, uses config default list limit.
-- `ls -str [limit]`: list starred non-sent messages only; if `limit` is omitted, lists all starred non-sent messages.
-- `ls -ext <limit>`: list external-domain messages only (excludes your own sender address and your preset domain).
-- `ls -snt [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]`: list/search sent messages with the same flag grammar as `ls`.
+- `ls -ur [-l <limit>]`: list unread messages only; if `-l` is omitted, lists all unread matches.
+- `ls -r [-l <limit>]`: list read received messages only (excludes sent); if `-l` is omitted, lists all read matches.
+- `ls -str [-l <limit>]`: list starred non-sent messages only; if `-l` is omitted, lists all starred non-sent messages.
+- `ls -ext [-l <limit>]`: list external-domain messages only (excludes your own sender address and your preset domain).
+- `ls -snt [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]`: list/search sent messages with the same flag grammar as `ls`.
 - `ls -o ...`: prints full body for each listed message and marks listed messages as read.
 - `ls -o` is supported with normal list modes (`<query>`, `-ur`, `-r`, `-ext`, `-snt`, `-t`) and not supported with audit modes (`-ura`, `-ra`).
-- `ls -ura [limit]`: interactive unread audit. Without `limit`, audits all unread messages continuously in batches of 10. For each unread message: `s` marks spam (adds sender to `spam_senders` and trashes message), `t` trashes message without spam-list update, `n` leaves message unread, `q` stops audit.
-- `ls -ra [limit]`: interactive read-mail audit with the same actions as `-ura`; without `limit`, processes read messages continuously in batches of 10.
+- `ls -ura [-l <limit>]`: interactive unread audit. Without `-l`, audits all unread messages continuously in batches of 10. For each unread message: `s` marks spam (adds sender to `spam_senders` and trashes message), `t` trashes message without spam-list update, `n` leaves message unread, `q` stops audit.
+- `ls -ra [-l <limit>]`: interactive read-mail audit with the same actions as `-ura`; without `-l`, processes read messages continuously in batches of 10.
 - Safety rule: both `-ura` and `-ra` never trash emails from `@gmail.com` senders.
 
 ## First run auth

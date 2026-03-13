@@ -6,7 +6,7 @@ from gmail_cli.query_parser import parse_list_query_args
 
 class QueryParserTests(unittest.TestCase):
     def test_parses_from_and_limit_args(self) -> None:
-        parsed = parse_list_query_args(["-f", "maanas", "1"], default_limit=10)
+        parsed = parse_list_query_args(["-f", "maanas", "-l", "1"], default_limit=10)
         self.assertEqual(parsed.gmail_query, "from:maanas")
         self.assertEqual(parsed.max_results, 1)
 
@@ -21,7 +21,7 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(parsed.max_results, 10)
 
     def test_parses_time_limit_named_month(self) -> None:
-        parsed = parse_list_query_args(["-tl", "jan 2025", "20"], default_limit=10)
+        parsed = parse_list_query_args(["-tl", "jan 2025", "-l", "20"], default_limit=10)
         self.assertEqual(parsed.gmail_query, "after:2024/12/31 before:2025/02/01")
         self.assertEqual(parsed.max_results, 20)
 
@@ -36,7 +36,7 @@ class QueryParserTests(unittest.TestCase):
 
     def test_invalid_limit_raises_usage_error(self) -> None:
         with self.assertRaises(UsageError):
-            parse_list_query_args(["0"], default_limit=10)
+            parse_list_query_args(["-l", "0"], default_limit=10)
 
     def test_invalid_time_limit_raises_usage_error(self) -> None:
         with self.assertRaises(UsageError):

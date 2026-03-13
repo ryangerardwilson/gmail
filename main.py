@@ -41,6 +41,7 @@ from gmail_cli.gmail_api import (
     mark_message_read,
     star_message,
     mark_message_unread,
+    message_has_non_calendar_attachment,
     unstar_message,
     reply_to_message,
     reply_to_thread,
@@ -97,14 +98,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> ms <message_id>\n"
             "gmail <preset> s -e\n"
             "gmail <preset> s <to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
-            "gmail <preset> ls [-o] [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]\n"
-            "gmail <preset> ls [-o] -ur [limit]\n"
-            "gmail <preset> ls [-o] -r [limit]\n"
-            "gmail <preset> ls [-o] -str [limit]\n"
-            "gmail <preset> ls [-o] -ext <limit>\n"
-            "gmail <preset> ls [-o] -snt [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]\n"
-            "gmail <preset> ls -ura [limit]\n"
-            "gmail <preset> ls -ra [limit]\n"
+            "gmail <preset> ls [-o] [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]\n"
+            "gmail <preset> ls [-o] -ur [-l <limit>]\n"
+            "gmail <preset> ls [-o] -r [-l <limit>]\n"
+            "gmail <preset> ls [-o] -str [-l <limit>]\n"
+            "gmail <preset> ls [-o] -ext [-l <limit>]\n"
+            "gmail <preset> ls [-o] -snt [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]\n"
+            "gmail <preset> ls -ura [-l <limit>]\n"
+            "gmail <preset> ls -ra [-l <limit>]\n"
             "gmail <preset> ls [-o] -t <thread_id>\n"
             "gmail <preset> r [-a] [-e] <message_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "gmail <preset> r [-a] [-e] -t <thread_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
@@ -142,7 +143,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
         "  gmail -u",
         "    upgrade to the latest release",
         "  gmail conf",
-        "    open the config in $VISUAL/$EDITOR",
+        "    open the config in $VISUAL/$EDITOR to edit settings such as signature_file",
     ]
     if show_examples:
         lines.extend(
@@ -153,7 +154,11 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  # auth <client_secret_path>",
                 "  gmail auth ~/Documents/credentials/client_secret.json",
                 "",
-                "  send a new email, with optional editor mode, cc, bcc, and attachments",
+                "  edit account config, including signature_file paths used for automatic send/reply signatures",
+                "  # conf",
+                "  gmail conf",
+                "",
+                "  send a new email, with optional editor mode, cc, bcc, and attachments; the configured signature is appended automatically",
                 "  # <preset> s [-e]|<to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> ...]",
                 "  gmail 1 s -e",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\"",
@@ -163,26 +168,28 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
                 "",
                 "  search, list, open, and audit messages",
-                "  # <preset> ls [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
-                "  gmail 1 ls 10",
-                "  gmail 1 ls -f xyz@example.com 5",
-                "  gmail 1 ls -c jake 1",
-                "  gmail 1 ls -f geeta -tl 2w 10",
-                "  gmail 1 ls -tl \"jan 2025\" 20",
+                "  # <preset> ls [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
+                "  gmail 1 ls -l 10",
+                "  gmail 1 ls -f xyz@example.com -l 5",
+                "  gmail 1 ls -c jake -l 1",
+                "  gmail 1 ls -wa -l 10",
+                "  gmail 1 ls -wa -f geeta -tl 2w -l 10",
+                "  gmail 1 ls -f geeta -tl 2w -l 10",
+                "  gmail 1 ls -tl \"jan 2025\" -l 20",
                 "  gmail 1 ls -ur",
-                "  gmail 1 ls -ur 1",
+                "  gmail 1 ls -ur -l 1",
                 "  gmail 1 ls -r",
-                "  gmail 1 ls -r 1",
+                "  gmail 1 ls -r -l 1",
                 "  gmail 1 ls -str",
-                "  gmail 1 ls -str 5",
-                "  gmail 1 ls -ext 10",
-                "  gmail 1 ls -snt 10",
-                "  gmail 1 ls -snt -c silvia 10",
-                "  gmail 1 ls -o -f xyz@example.com 1",
-                "  gmail 1 ls -o -ur 1",
+                "  gmail 1 ls -str -l 5",
+                "  gmail 1 ls -ext -l 10",
+                "  gmail 1 ls -snt -l 10",
+                "  gmail 1 ls -snt -c silvia -l 10",
+                "  gmail 1 ls -o -f xyz@example.com -l 1",
+                "  gmail 1 ls -o -ur -l 1",
                 "  # <preset> ls -ura|-ra <number_of_messages_to_audit>",
-                "  gmail 1 ls -ura 10",
-                "  gmail 1 ls -ra 10",
+                "  gmail 1 ls -ura -l 10",
+                "  gmail 1 ls -ra -l 10",
                 "  gmail 1 ls -t \"19ca756c06a7ebcd\"",
                 "",
                 "  open or change message state",
@@ -197,7 +204,7 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 d \"19caef2cd6494116\"",
                 "  gmail 1 ms \"19caef2cd6494116\"",
                 "",
-                "  reply to a message or thread, with optional reply-all and editor mode",
+                "  reply to a message or thread, with optional reply-all and editor mode; the configured signature is appended automatically",
                 "  # <preset> r [-a] [-e] <message_id|thread_id> <body>|-dp <draft_path>",
                 "  gmail 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
                 "  gmail 1 r \"19caef2cd6494116\" -dp \"/tmp/reply.txt\"",
@@ -535,18 +542,16 @@ def _handle_send(
 
 
 def _parse_optional_limit(flag: str, params: list[str]) -> int | None:
-    if len(params) > 2:
-        raise UsageError(f"{flag} accepts at most 1 optional param: [limit]")
     if len(params) == 1:
         return None
-    max_results: int | None = None
-    if len(params) == 2:
-        try:
-            max_results = int(params[1])
-        except ValueError as exc:
-            raise UsageError(f"{flag} limit must be a positive integer") from exc
-        if max_results <= 0:
-            raise UsageError(f"{flag} limit must be > 0")
+    if len(params) != 3 or params[1] != "-l":
+        raise UsageError(f"{flag} accepts only optional flag: -l <limit>")
+    try:
+        max_results = int(params[2])
+    except ValueError as exc:
+        raise UsageError(f"{flag} -l limit must be a positive integer") from exc
+    if max_results <= 0:
+        raise UsageError(f"{flag} -l limit must be > 0")
     return max_results
 
 
@@ -554,6 +559,52 @@ def _list_with_optional_limit(service, gmail_query: str, max_results: int | None
     if max_results is None:
         return list_all_messages(service, gmail_query)
     return list_messages(service, gmail_query, max_results)
+
+
+def _attachment_filtered_query(gmail_query: str) -> str:
+    parts = [term for term in (gmail_query.strip(), "has:attachment") if term]
+    return " ".join(parts)
+
+
+def _filter_messages_with_attachments(messages: list[dict]) -> list[dict]:
+    return [message for message in messages if message_has_non_calendar_attachment(message)]
+
+
+def _list_with_attachment_filter(
+    service,
+    gmail_query: str,
+    max_results: int | None,
+) -> list[dict]:
+    attachment_query = _attachment_filtered_query(gmail_query)
+    if max_results is None:
+        return _filter_messages_with_attachments(list_all_messages(service, attachment_query))
+
+    matched: list[dict] = []
+    page_token: str | None = None
+    while len(matched) < max_results:
+        page, page_token = list_messages_page(service, attachment_query, max_results, page_token=page_token)
+        if not page:
+            break
+        for message in page:
+            if message_has_non_calendar_attachment(message):
+                matched.append(message)
+                if len(matched) >= max_results:
+                    break
+        if page_token is None:
+            break
+    return matched
+
+
+def _list_matching_messages(
+    service,
+    gmail_query: str,
+    max_results: int | None,
+    *,
+    attachments_only: bool,
+) -> list[dict]:
+    if attachments_only:
+        return _list_with_attachment_filter(service, gmail_query, max_results)
+    return _list_with_optional_limit(service, gmail_query, max_results)
 
 
 def _is_gmail_sender(sender_email: str) -> bool:
@@ -619,15 +670,19 @@ def _audit_message_batch(
     return audited, trashed, stopped
 
 
-def _extract_list_open_flag(params: list[str]) -> tuple[bool, list[str]]:
+def _extract_list_flags(params: list[str]) -> tuple[bool, bool, list[str]]:
     open_mode = False
+    attachments_only = False
     filtered: list[str] = []
     for token in params:
         if token == "-o":
             open_mode = True
             continue
+        if token == "-wa":
+            attachments_only = True
+            continue
         filtered.append(token)
-    return open_mode, filtered
+    return open_mode, attachments_only, filtered
 
 
 def _print_list_results(
@@ -689,73 +744,90 @@ def _handle_list(
     config_path=None,
     account=None,
 ) -> int:
-    open_mode, filtered_params = _extract_list_open_flag(params)
+    open_mode, attachments_only, filtered_params = _extract_list_flags(params)
     if not filtered_params:
+        if attachments_only:
+            messages = _list_matching_messages(
+                service,
+                "-in:sent",
+                default_limit,
+                attachments_only=True,
+            )
+            messages = _sort_messages_oldest_first(messages)
+            _print_list_results(service, messages, my_email, utc_offset, open_mode)
+            return 0
         raise UsageError(
-            "ls requires [limit], -f <from>, -c <contains>, -tl <time_limit>, or a mode flag like -ur"
+            "ls requires -l <limit>, -wa, -f <from>, -c <contains>, -tl <time_limit>, or a mode flag like -ur"
         )
     if filtered_params[0] in {"-ura", "-ra"} and open_mode:
         raise UsageError("ls -o is not supported with -ura or -ra")
+    if filtered_params[0] in {"-ura", "-ra"} and attachments_only:
+        raise UsageError("ls -wa is not supported with -ura or -ra")
 
     if filtered_params[0] == "-ur":
         max_results = _parse_optional_limit("ls -ur", filtered_params)
-        messages = _list_with_optional_limit(service, _exclude_sent_query("is:unread"), max_results)
+        messages = _list_matching_messages(
+            service,
+            _exclude_sent_query("is:unread"),
+            max_results,
+            attachments_only=attachments_only,
+        )
         messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
     if filtered_params[0] == "-r":
         max_results = _parse_optional_limit("ls -r", filtered_params)
-        messages = _list_with_optional_limit(service, _exclude_sent_query("is:read"), max_results)
+        messages = _list_matching_messages(
+            service,
+            _exclude_sent_query("is:read"),
+            max_results,
+            attachments_only=attachments_only,
+        )
         messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
     if filtered_params[0] == "-str":
         max_results = _parse_optional_limit("ls -str", filtered_params)
-        messages = _list_with_optional_limit(service, _exclude_sent_query("is:starred"), max_results)
+        messages = _list_matching_messages(
+            service,
+            _exclude_sent_query("is:starred"),
+            max_results,
+            attachments_only=attachments_only,
+        )
         messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
     if filtered_params[0] == "-ext":
-        if len(filtered_params) > 2:
-            raise UsageError("ls -ext accepts at most 1 optional param: [limit]")
-        max_results: int | None = None
-        if len(filtered_params) == 2:
-            try:
-                max_results = int(filtered_params[1])
-            except ValueError as exc:
-                raise UsageError("ls -ext limit must be a positive integer") from exc
-            if max_results <= 0:
-                raise UsageError("ls -ext limit must be > 0")
+        max_results = _parse_optional_limit("ls -ext", filtered_params)
         domain = my_email.split("@", 1)[1].strip().lower() if "@" in my_email else ""
         ext_query = _exclude_sent_query(f"-from:{my_email}")
         if domain:
             ext_query += f" -from:*@{domain}"
-        messages = _list_with_optional_limit(service, ext_query, max_results)
+        messages = _list_matching_messages(
+            service,
+            ext_query,
+            max_results,
+            attachments_only=attachments_only,
+        )
         messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
     if filtered_params[0] == "-snt":
         if len(filtered_params) == 1:
-            messages = list_all_messages(service, "in:sent")
+            max_results = default_limit if attachments_only else None
+            messages = _list_matching_messages(
+                service,
+                "in:sent",
+                max_results,
+                attachments_only=attachments_only,
+            )
             messages = _sort_messages_oldest_first(messages)
             _print_list_results(service, messages, my_email, utc_offset, open_mode)
             return 0
-        if len(filtered_params) == 2:
-            try:
-                max_results = int(filtered_params[1])
-            except ValueError:
-                max_results = -1
-            if max_results > 0:
-                messages = list_messages(service, "in:sent", max_results)
-                messages = _sort_messages_oldest_first(messages)
-                _print_list_results(service, messages, my_email, utc_offset, open_mode)
-                return 0
-            if max_results == 0:
-                raise UsageError("ls -snt limit must be > 0")
 
         parsed = parse_list_query_args(
             filtered_params[1:],
@@ -763,7 +835,12 @@ def _handle_list(
             base_terms=["in:sent"],
             require_filter_or_limit=True,
         )
-        messages = _list_with_optional_limit(service, parsed.gmail_query, parsed.max_results)
+        messages = _list_matching_messages(
+            service,
+            parsed.gmail_query,
+            parsed.max_results,
+            attachments_only=attachments_only,
+        )
         messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
@@ -803,12 +880,19 @@ def _handle_list(
             raise UsageError("ls -t requires exactly 1 param: <thread_id>")
         thread_id = filtered_params[1]
         messages = get_thread_messages(service, thread_id)
+        if attachments_only:
+            messages = _filter_messages_with_attachments(messages)
         messages = _sort_messages_oldest_first(messages)
         _print_list_results(service, messages, my_email, utc_offset, open_mode)
         return 0
 
     parsed = parse_list_query_args(filtered_params, default_limit, base_terms=["-in:sent"])
-    messages = _list_with_optional_limit(service, parsed.gmail_query, parsed.max_results)
+    messages = _list_matching_messages(
+        service,
+        parsed.gmail_query,
+        parsed.max_results,
+        attachments_only=attachments_only,
+    )
     messages = _sort_messages_oldest_first(messages)
     _print_list_results(service, messages, my_email, utc_offset, open_mode)
     return 0

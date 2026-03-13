@@ -8,6 +8,7 @@ from gmail_cli.gmail_api import (
     download_message_attachments,
     hydrate_message_text_bodies,
     hydrate_message_text_from_raw,
+    message_has_non_calendar_attachment,
 )
 
 
@@ -109,6 +110,30 @@ class GmailApiTextBodiesTests(unittest.TestCase):
 
         self.assertEqual(downloaded, [Path(tmp_dir) / "notes.txt"])
         attachments_api.get.assert_called_once_with(userId="me", messageId="m1", id="att-txt")
+
+    def test_message_has_non_calendar_attachment_ignores_ics_only_invites(self) -> None:
+        message = {
+            "payload": {
+                "parts": [
+                    {"filename": "invite.ics", "body": {"attachmentId": "att-1"}},
+                    {"filename": "MEETING.ICS", "body": {"data": "aGVsbG8"}},
+                ]
+            }
+        }
+
+        self.assertFalse(message_has_non_calendar_attachment(message))
+
+    def test_message_has_non_calendar_attachment_accepts_real_files(self) -> None:
+        message = {
+            "payload": {
+                "parts": [
+                    {"filename": "invite.ics", "body": {"attachmentId": "att-1"}},
+                    {"filename": "notes.pdf", "body": {"attachmentId": "att-2"}},
+                ]
+            }
+        }
+
+        self.assertTrue(message_has_non_calendar_attachment(message))
 
 
 if __name__ == "__main__":

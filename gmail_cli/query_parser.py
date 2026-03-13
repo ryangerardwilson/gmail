@@ -187,27 +187,33 @@ def parse_list_query_args(
             i += 2
             continue
 
+        if token == "-l":
+            if i + 1 >= len(params):
+                raise UsageError("ls -l requires: <limit>")
+            try:
+                parsed_limit = int(params[i + 1])
+            except ValueError as exc:
+                raise UsageError("ls -l limit must be a positive integer") from exc
+            if parsed_limit <= 0:
+                raise UsageError(f"ls -l limit must be > 0, got {parsed_limit}")
+            if max_results is not None:
+                raise UsageError("ls accepts only one -l <limit>")
+            max_results = parsed_limit
+            saw_user_filter = True
+            i += 2
+            continue
+
         if token.startswith("-"):
             raise UsageError(
-                f"Unknown ls option '{token}'. Supported: [limit], -f <from>, -c <contains>, -tl <time_limit>"
+                f"Unknown ls option '{token}'. Supported: -l <limit>, -f <from>, -c <contains>, -tl <time_limit>"
             )
 
-        try:
-            parsed_limit = int(token)
-        except ValueError as exc:
-            raise UsageError(
-                "ls supports only [limit], -f <from>, -c <contains>, and -tl <time_limit>"
-            ) from exc
-        if parsed_limit <= 0:
-            raise UsageError(f"ls limit must be > 0, got {parsed_limit}")
-        if max_results is not None:
-            raise UsageError("ls accepts only one positional [limit]")
-        max_results = parsed_limit
-        saw_user_filter = True
-        i += 1
+        raise UsageError(
+            "ls supports only -l <limit>, -f <from>, -c <contains>, and -tl <time_limit>"
+        )
 
     if require_filter_or_limit and not saw_user_filter:
-        raise UsageError("ls requires [limit], -f <from>, -c <contains>, or -tl <time_limit>")
+        raise UsageError("ls requires -l <limit>, -f <from>, -c <contains>, or -tl <time_limit>")
 
     if max_results is None and saw_user_filter:
         max_results = default_limit

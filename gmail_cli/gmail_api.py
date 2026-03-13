@@ -421,6 +421,17 @@ def _should_skip_downloaded_attachment(filename: str) -> bool:
     return Path(filename).suffix.lower() == ".ics"
 
 
+def message_has_non_calendar_attachment(message: dict[str, Any]) -> bool:
+    payload = message.get("payload", {})
+    if not isinstance(payload, dict):
+        return False
+
+    for filename, _, _ in _attachment_parts(payload):
+        if not _should_skip_downloaded_attachment(filename):
+            return True
+    return False
+
+
 def download_message_attachments(
     service,
     message: dict[str, Any],

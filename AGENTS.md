@@ -26,9 +26,10 @@ using account presets defined in XDG-compliant config.
   - token file naming should use a stable internal account key rather than the preset number.
   - CLI must automatically create the data/token directories if missing.
   - do not keep legacy preset-token fallback logic in the main runtime.
+- `signature_file` must remain a per-account config setting, and send/reply flows must append that configured signature automatically.
 - CLI interface must support:
   - `python main.py <preset> s <to> <subject> <body>`
-  - `python main.py <preset> ls [limit] [-f <from>] [-c <contains>] [-tl <time_limit>]`
+  - `python main.py <preset> ls [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]`
   - `python main.py <preset> r <message_id> <body>`
 - Spam cleanup should support both:
   - `python main.py <preset> sc`
@@ -38,11 +39,12 @@ using account presets defined in XDG-compliant config.
   - `python main.py td`
   - `python main.py st`
 - List examples to support:
-  - `python main.py 1 ls 10`
-  - `python main.py 1 ls -f maanas 1`
-  - `python main.py 1 ls -c invoice 10`
-  - `python main.py 1 ls -f geeta -tl 2w 10`
-  - `python main.py 1 ls -tl "jan 2025" 20`
+  - `python main.py 1 ls -l 10`
+  - `python main.py 1 ls -wa -l 10`
+  - `python main.py 1 ls -f maanas -l 1`
+  - `python main.py 1 ls -c invoice -l 10`
+  - `python main.py 1 ls -f geeta -tl 2w -l 10`
+  - `python main.py 1 ls -tl "jan 2025" -l 20`
 
 ## Architecture expectations
 - Keep API boundaries clean:
@@ -86,7 +88,8 @@ Adjust structure if needed, but preserve separation of concerns.
 
 ## Search/query behavior
 - Parse `ls` args into:
-  - optional positional `limit`
+  - optional `-l <limit>`
+  - `-wa` downloadable-attachment filter
   - `-f <from>` sender filter
   - `-c <contains>` Gmail full-text term filter
   - `-tl <time_limit>` time filter
@@ -126,6 +129,6 @@ Adjust structure if needed, but preserve separation of concerns.
 - Global `sc` runs spam cleanup across all configured presets.
 - `ti` installs one hourly user timer that runs the same global spam cleanup command and sends a success notification through `notify-send`.
 - Config path resolution is XDG-compliant.
-- `ls 10`, `ls -f maanas 1`, `ls -c invoice 10`, `ls -f geeta -tl 2w 10`, and `ls -tl "jan 2025" 20` work.
+- `ls -l 10`, `ls -wa -l 10`, `ls -f maanas -l 1`, `ls -c invoice -l 10`, `ls -f geeta -tl 2w -l 10`, and `ls -tl "jan 2025" -l 20` work.
 - Tests for core parsing/config logic pass locally.
 - README is sufficient for a new user to run first auth and send an email.

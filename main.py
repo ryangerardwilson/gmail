@@ -53,11 +53,50 @@ from gmail_cli.spam_flow import (
     run_cleanup_for_account,
     run_identify_for_account,
 )
+from rgw_cli_contract import AppSpec, resolve_install_script_path, run_app
 
 _TRAILING_OPTIONS = {"-cc", "-bcc", "-atch", "-dp"}
 ANSI_RESET = "\033[0m"
 ANSI_GRAY = "\033[38;5;245m"
 GLOBAL_COMMANDS = {"conf", "sc", "ti", "td", "st"}
+INSTALL_SCRIPT = resolve_install_script_path(__file__)
+HELP_TEXT = """Gmail CLI
+
+flags:
+  gmail -h
+    show this help
+  gmail -v
+    print the installed version
+  gmail -u
+    upgrade to the latest release
+  gmail conf
+    open the config in $VISUAL/$EDITOR to edit settings such as signature_file
+
+features:
+  authorize a Google account and save or refresh its preset
+  # gmail auth <client_secret_path>
+  gmail auth ~/Documents/credentials/client_secret.json
+
+  send, search, open, and reply to messages for a configured preset
+  # gmail <preset> s|ls|o|r ...
+  gmail 1 s -e
+  gmail 1 ls -l 10
+  gmail 1 o "19caef2cd6494116"
+  gmail 1 r -e "19caef2cd6494116"
+
+  clean spam, manage sender lists, and control the hourly timer
+  # gmail sc | gmail ti | gmail td | gmail st | gmail <preset> si|sc|sa|se
+  gmail sc
+  gmail ti
+  gmail 1 si
+  gmail 1 sa "spam1@example.com,spam2@example.com"
+
+  manage saved contacts for a preset
+  # gmail <preset> cn | cn -a <alias> <email> | cn -d <alias> | cn -e
+  gmail 1 cn
+  gmail 1 cn -a boss boss@example.com
+  gmail 1 cn -e
+"""
 
 
 def _muted_text(text: str) -> str:
@@ -81,6 +120,7 @@ def _comment_help_line(line: str) -> str:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Gmail CLI",
+        add_help=False,
         usage=(
             "gmail -v\n"
             "gmail -u\n"
@@ -122,18 +162,6 @@ def _build_parser() -> argparse.ArgumentParser:
             "gmail <preset> r [-a] [-e] <message_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
             "gmail <preset> r [-a] [-e] -t <thread_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
         ),
-    )
-    parser.add_argument(
-        "-v",
-        action="version",
-        version=__version__,
-        help="Show version and exit.",
-    )
-    parser.add_argument(
-        "-u",
-        dest="upgrade",
-        action="store_true",
-        help="Upgrade to latest release using install.sh.",
     )
     parser.add_argument(
         "preset", nargs="?", help="Account preset key from config.json, e.g. 1"
@@ -1597,33 +1625,6 @@ def _append_signature(body: str, signature: str) -> str:
     return f"{body_clean}\n\n{sig_block}"
 
 
-def _upgrade_to_latest() -> int:
-    curl = shutil.which("curl")
-    bash = shutil.which("bash")
-    if not curl:
-        print("curl not found in PATH.", file=sys.stderr)
-        return 1
-    if not bash:
-        print("bash not found in PATH.", file=sys.stderr)
-        return 1
-
-    url = "https://raw.githubusercontent.com/ryangerardwilson/gmail/main/install.sh"
-    with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-
-    try:
-        fetch = subprocess.run([curl, "-fsSL", url, "-o", str(tmp_path)], check=False)
-        if fetch.returncode != 0:
-            return fetch.returncode
-        run = subprocess.run([bash, str(tmp_path)], check=False)
-        return run.returncode
-    finally:
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-
-
 def _default_signature_path(email: str) -> Path:
     return Path("~/.config/gmail/signatures").expanduser() / f"{email}.txt"
 
@@ -1658,12 +1659,7 @@ def _handle_auth(params: list[str]) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    if argv is None:
-        argv = sys.argv[1:]
-    if argv and argv[0] == "-h":
-        _print_usage_guide(show_examples=True, show_usage=True)
-        return 0
+def _dispatch(argv: list[str]) -> int:
     if not argv:
         _print_usage_guide(show_examples=True, show_usage=True)
         return 0
@@ -1692,10 +1688,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.upgrade:
-        if args.preset or args.command or args.params:
-            raise UsageError("-u does not accept extra args. Use: gmail -u")
-        return _upgrade_to_latest()
     if not args.preset or not args.command:
         raise UsageError("Expected: <preset> <command>. Use -h for usage.")
 
@@ -1774,6 +1766,22 @@ def main(argv: list[str] | None = None) -> int:
     raise UsageError(
         f"Unknown command '{args.command}'. Use s, ls, r, o, mr, mra, mur, mstr, mustr, d, ms, si, sc, sa, se, or cn."
     )
+
+
+APP_SPEC = AppSpec(
+    app_name="gmail",
+    version=__version__,
+    help_text=HELP_TEXT,
+    install_script_path=INSTALL_SCRIPT,
+    no_args_mode="help",
+    config_path_factory=resolve_config_path,
+    config_bootstrap_text='{\n  "defaults": {\n    "list_limit": 10,\n    "timezone_offset": "+05:30"\n  },\n  "accounts": {}\n}\n',
+)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    return run_app(APP_SPEC, args, _dispatch)
 
 
 if __name__ == "__main__":

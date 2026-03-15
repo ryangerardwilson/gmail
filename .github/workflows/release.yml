@@ -69,6 +69,7 @@ jobs:
               "$PYBIN" -m PyInstaller --clean --onedir --name gmail \
                 --collect-all charset_normalizer \
                 main.py
+              cp install.sh dist/gmail/
 
               tar -C dist -czf gmail-linux-x64.tar.gz gmail
             '

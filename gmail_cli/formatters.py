@@ -4,15 +4,11 @@ import base64
 from datetime import timedelta, timezone
 from html import unescape
 from html.parser import HTMLParser
-import os
 import quopri
 import re
 from email.utils import parseaddr
 from email.utils import parsedate_to_datetime
 from typing import Any
-ANSI_RESET = "\033[0m"
-ANSI_GRAY = "\033[38;5;245m"
-ANSI_WHITE = "\033[97m"
 _BLOCK_TAGS = {
     "address",
     "article",
@@ -582,16 +578,11 @@ def summarize_message(
 
 
 def _apply_color(block: str, is_from_me: bool) -> str:
-    if os.getenv("NO_COLOR"):
-        return block
-    color = ANSI_GRAY if is_from_me else ANSI_WHITE
-    return f"{color}{block}{ANSI_RESET}"
+    return block
 
 
 def _apply_gray(block: str) -> str:
-    if os.getenv("NO_COLOR"):
-        return block
-    return f"{ANSI_GRAY}{block}{ANSI_RESET}"
+    return block
 
 
 def render_messages_table(

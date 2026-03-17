@@ -1,11 +1,7 @@
 import base64
-import os
 import unittest
 
 from gmail_cli.formatters import (
-    ANSI_GRAY,
-    ANSI_RESET,
-    ANSI_WHITE,
     render_message_open,
     summarize_message,
 )
@@ -270,30 +266,12 @@ class FormatterTests(unittest.TestCase):
         row = summarize_message(message, trim_body=False, strip_history=True)
         self.assertEqual(row["body"], "Hi Ryan,\nThanks for the call.")
 
-    def test_render_open_header_gray_body_white_for_non_self(self) -> None:
+    def test_render_open_uses_terminal_default_styling(self) -> None:
         message = _message_with_payload({"mimeType": "text/plain", "body": {"data": _encode("hello")}})
-        original = os.environ.get("NO_COLOR")
-        if "NO_COLOR" in os.environ:
-            del os.environ["NO_COLOR"]
-        try:
-            output = render_message_open(message, "me@example.com")
-        finally:
-            if original is not None:
-                os.environ["NO_COLOR"] = original
-        self.assertIn(f"{ANSI_GRAY}message_id: m1", output)
-        self.assertIn(f"body:{ANSI_RESET}\n\n{ANSI_WHITE}hello{ANSI_RESET}", output)
-
-    def test_render_open_no_color_has_no_ansi(self) -> None:
         message = _message_with_payload({"mimeType": "text/plain", "body": {"data": _encode("hello")}})
-        original = os.environ.get("NO_COLOR")
-        os.environ["NO_COLOR"] = "1"
-        try:
-            output = render_message_open(message, "me@example.com")
-        finally:
-            if original is None:
-                del os.environ["NO_COLOR"]
-            else:
-                os.environ["NO_COLOR"] = original
+        output = render_message_open(message, "me@example.com")
+        self.assertIn("message_id: m1", output)
+        self.assertIn("body:\n\nhello", output)
         self.assertNotIn("\033[", output)
 
 

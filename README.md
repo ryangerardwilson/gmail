@@ -35,6 +35,13 @@ Required permissions/scopes used by this CLI:
 curl -fsSL https://raw.githubusercontent.com/ryangerardwilson/gmail/main/install.sh | bash
 ```
 
+Manually add this to `~/.bashrc`, then reload your shell:
+
+```bash
+export PATH="$HOME/.gmail/bin:$PATH"
+source ~/.bashrc
+```
+
 ## External dependencies
 
 - `notify-send` for timer success notifications

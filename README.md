@@ -35,10 +35,11 @@ Required permissions/scopes used by this CLI:
 curl -fsSL https://raw.githubusercontent.com/ryangerardwilson/gmail/main/install.sh | bash
 ```
 
-Manually add this to `~/.bashrc`, then reload your shell:
+If `~/.local/bin` is not already on your `PATH`, add it once to `~/.bashrc`
+and reload your shell:
 
 ```bash
-export PATH="$HOME/.gmail/bin:$PATH"
+export PATH="$HOME/.local/bin:$PATH"
 source ~/.bashrc
 ```
 

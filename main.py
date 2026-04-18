@@ -63,6 +63,8 @@ HELP_TEXT = """Gmail CLI
 flags:
   gmail -h
     show this help
+  gmail -h <topic>
+    show help for one command like ls, s, r, sc, or cn
   gmail -v
     print the installed version
   gmail -u
@@ -75,10 +77,18 @@ features:
   # gmail auth <client_secret_path>
   gmail auth ~/Documents/credentials/client_secret.json
 
-  send, search, open, and reply to messages for a configured preset
+  drill into help for one command only
+  # gmail -h <topic>
+  gmail -h ls
+  gmail -h s
+  gmail -h sc
+
+  send email, search by sender/content/time, open messages, and reply from a configured preset
   # gmail <preset> s|ls|o|r ...
   gmail 1 s -e
-  gmail 1 ls -l 10
+  gmail 1 ls -f geeta -tl 2w -l 10
+  gmail 1 ls -c invoice -tl "jan 2025" -l 20
+  gmail 1 ls -snt -c proposal -tl 14d -l 10
   gmail 1 o "19caef2cd6494116"
   gmail 1 r -e "19caef2cd6494116"
 
@@ -96,17 +106,193 @@ features:
   gmail 1 cn -e
 """
 
+_HELP_TOPIC_ORDER = [
+    "auth",
+    "conf",
+    "s",
+    "ls",
+    "r",
+    "o",
+    "mr",
+    "mra",
+    "mur",
+    "mstr",
+    "mustr",
+    "d",
+    "ms",
+    "si",
+    "sc",
+    "sa",
+    "se",
+    "ti",
+    "td",
+    "st",
+    "cn",
+]
+
+_HELP_TOPIC_ALIASES = {
+    "-s": "s",
+}
+
+_HELP_TOPICS: dict[str, list[str]] = {
+    "auth": [
+        "  authorize a Google account and save or refresh its preset",
+        "  # gmail auth <client_secret_path>",
+        "  gmail auth ~/Documents/credentials/client_secret.json",
+    ],
+    "conf": [
+        "  open the config in $VISUAL/$EDITOR so you can edit settings such as signature_file",
+        "  # gmail conf",
+        "  gmail conf",
+    ],
+    "s": [
+        "  send a new email, with optional editor mode, cc, bcc, and attachments; the configured signature is appended automatically",
+        "  # gmail <preset> s [-e]|<to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> ...]",
+        "  gmail 1 s -e",
+        "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\"",
+        "  gmail 1 s \"xyz@example.com\" \"Hello\" -dp \"/tmp/draft.txt\"",
+        "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -cc \"cc1@example.com,cc2@example.com\" -bcc \"audit@example.com\"",
+        "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
+    ],
+    "ls": [
+        "  search inbox and sent mail by sender, content, attachments, or time window; optionally open matches or inspect unread, read, starred, sent, attachment-bearing, or thread-specific results",
+        "  # gmail <preset> ls [-o] [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
+        "  gmail 1 ls -f geeta -tl 2w -l 10",
+        "  gmail 1 ls -c invoice -tl \"jan 2025\" -l 20",
+        "  gmail 1 ls -snt -c proposal -tl 14d -l 10",
+        "  gmail 1 ls -wa -f geeta -tl 2w -l 10",
+        "  gmail 1 ls -o -f xyz@example.com -l 1",
+        "  gmail 1 ls -ur",
+        "  gmail 1 ls -t \"19ca756c06a7ebcd\"",
+    ],
+    "r": [
+        "  reply to a message or thread, with optional reply-all, editor mode, cc, bcc, and attachments; the configured signature is appended automatically",
+        "  # gmail <preset> r [-a] [-e] <message_id|thread_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> ...]",
+        "  gmail 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
+        "  gmail 1 r \"19caef2cd6494116\" -dp \"/tmp/reply.txt\"",
+        "  gmail 1 r -e \"19caef2cd6494116\"",
+        "  gmail 1 r -a \"19caef2cd6494116\" \"Thanks all.\"",
+        "  gmail 1 r -t \"19ca756c06a7ebcd\" \"Following up on this thread.\"",
+    ],
+    "o": [
+        "  open a message or thread, mark the opened messages as read, and download any attachments into the current working directory",
+        "  # gmail <preset> o <message_id>",
+        "  gmail 1 o \"19caef2cd6494116\"",
+        "  # gmail <preset> o -t <thread_id>",
+        "  gmail 1 o -t \"19ca756c06a7ebcd\"",
+    ],
+    "mr": [
+        "  mark one message as read",
+        "  # gmail <preset> mr <message_id>",
+        "  gmail 1 mr \"19caef2cd6494116\"",
+    ],
+    "mra": [
+        "  mark every unread message in the preset as read",
+        "  # gmail <preset> mra",
+        "  gmail 1 mra",
+    ],
+    "mur": [
+        "  mark one message as unread",
+        "  # gmail <preset> mur <message_id>",
+        "  gmail 1 mur \"19caef2cd6494116\"",
+    ],
+    "mstr": [
+        "  star one message",
+        "  # gmail <preset> mstr <message_id>",
+        "  gmail 1 mstr \"19caef2cd6494116\"",
+    ],
+    "mustr": [
+        "  remove the star from one message",
+        "  # gmail <preset> mustr <message_id>",
+        "  gmail 1 mustr \"19caef2cd6494116\"",
+    ],
+    "d": [
+        "  delete one message by message id",
+        "  # gmail <preset> d <message_id>",
+        "  gmail 1 d \"19caef2cd6494116\"",
+    ],
+    "ms": [
+        "  add the sender from one message to the preset spam list and trash that message immediately",
+        "  # gmail <preset> ms <message_id>",
+        "  gmail 1 ms \"19caef2cd6494116\"",
+    ],
+    "si": [
+        "  inspect unread non-gmail senders for one preset and interactively add likely spam senders to that preset's spam list",
+        "  # gmail <preset> si",
+        "  gmail 1 si",
+    ],
+    "sc": [
+        "  clean spam either across every configured preset or for one specific preset",
+        "  # gmail sc",
+        "  gmail sc",
+        "  # gmail <preset> sc",
+        "  gmail 1 sc",
+    ],
+    "sa": [
+        "  add spam senders or domains to one preset, or add all current unread senders and trash those unread messages with -ur",
+        "  # gmail <preset> sa <spam_email1,spam_email2,...>|-ur",
+        "  gmail 1 sa \"spam1@example.com,spam2@example.com\"",
+        "  gmail 1 sa \"@domain1.com,@domain2.com\"",
+        "  gmail 1 sa -ur",
+    ],
+    "se": [
+        "  add senders or domains to one preset's spam exclude list",
+        "  # gmail <preset> se <email1,email2,...>",
+        "  gmail 1 se \"trusted1@example.com,trusted2@example.com\"",
+        "  gmail 1 se \"@trusted-domain.com\"",
+    ],
+    "ti": [
+        "  install and start the hourly spam-clean timer",
+        "  # gmail ti",
+        "  gmail ti",
+    ],
+    "td": [
+        "  disable and stop the hourly spam-clean timer",
+        "  # gmail td",
+        "  gmail td",
+    ],
+    "st": [
+        "  show the current status of the hourly spam-clean timer",
+        "  # gmail st",
+        "  gmail st",
+    ],
+    "cn": [
+        "  list, add, delete, or edit saved contact aliases for one preset",
+        "  # gmail <preset> cn | cn -a <alias> <email> | cn -d <alias> | cn -e",
+        "  gmail 1 cn",
+        "  gmail 1 cn -a \"silvia\" \"xyz@hbc.com\"",
+        "  gmail 1 cn -d \"silvia\"",
+        "  gmail 1 cn -e",
+    ],
+}
+
 
 def _comment_help_line(line: str) -> str:
     if not line:
         return line
     stripped = line.lstrip()
-    if stripped == "Gmail CLI":
+    if stripped in {"Gmail CLI", "flags:", "features:"}:
         return line
     if stripped.startswith("#") or stripped.startswith("gmail "):
         return line
     indent = line[: len(line) - len(stripped)]
     return f"{indent}# {stripped}"
+
+
+def _supported_help_topics() -> str:
+    return ", ".join(_HELP_TOPIC_ORDER)
+
+
+def _print_help_topic(topic: str) -> int:
+    canonical = _HELP_TOPIC_ALIASES.get(topic.lower(), topic.lower())
+    topic_lines = _HELP_TOPICS.get(canonical)
+    if topic_lines is None:
+        raise UsageError(
+            f"Unknown help topic '{topic}'. Known topics: {_supported_help_topics()}"
+        )
+    lines = ["Gmail CLI", "", "features:", *topic_lines]
+    print("\n".join(_comment_help_line(line) for line in lines))
+    return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -170,6 +356,8 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
         "flags:",
         "  gmail -h",
         "    show this help",
+        "  gmail -h <topic>",
+        "    show help for one command like ls, s, r, sc, or cn",
         "  gmail -v",
         "    print the installed version",
         "  gmail -u",
@@ -186,6 +374,12 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  # auth <client_secret_path>",
                 "  gmail auth ~/Documents/credentials/client_secret.json",
                 "",
+                "  drill into help for one command only",
+                "  # -h <topic>",
+                "  gmail -h ls",
+                "  gmail -h s",
+                "  gmail -h sc",
+                "",
                 "  edit account config, including signature_file paths used for automatic send/reply signatures",
                 "  # conf",
                 "  gmail conf",
@@ -199,14 +393,14 @@ def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> N
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\"",
                 "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
                 "",
-                "  search, list, open, and audit messages",
+                "  search inbox and sent mail by sender, content, attachments, or time window; then open or audit the matching messages",
                 "  # <preset> ls [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
-                "  gmail 1 ls -l 10",
-                "  gmail 1 ls -f xyz@example.com -l 5",
-                "  gmail 1 ls -c jake -l 1",
-                "  gmail 1 ls -wa -l 10",
-                "  gmail 1 ls -wa -f geeta -tl 2w -l 10",
                 "  gmail 1 ls -f geeta -tl 2w -l 10",
+                "  gmail 1 ls -c invoice -tl \"jan 2025\" -l 20",
+                "  gmail 1 ls -snt -c proposal -tl 14d -l 10",
+                "  gmail 1 ls -wa -f geeta -tl 2w -l 10",
+                "  gmail 1 ls -l 10",
+                "  gmail 1 ls -wa -l 10",
                 "  gmail 1 ls -tl \"jan 2025\" -l 20",
                 "  gmail 1 ls -ur",
                 "  gmail 1 ls -ur -l 1",
@@ -1773,6 +1967,10 @@ APP_SPEC = AppSpec(
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["-h"] and len(args) > 1:
+        if len(args) != 2:
+            raise UsageError("Use: gmail -h or gmail -h <topic>")
+        return _print_help_topic(args[1])
     return run_app(APP_SPEC, args, _dispatch)
 
 

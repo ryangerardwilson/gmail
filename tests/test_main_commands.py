@@ -74,13 +74,52 @@ class MainCommandTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("Gmail CLI", output)
         self.assertIn("features:", output)
+        self.assertIn("gmail -h <topic>", output)
         self.assertIn("# gmail auth <client_secret_path>", output)
         self.assertIn("# gmail <preset> s|ls|o|r ...", output)
         self.assertIn("# gmail sc | gmail ti | gmail td | gmail st | gmail <preset> si|sc|sa|se", output)
-        self.assertIn("gmail 1 ls -l 10", output)
+        self.assertIn("gmail 1 ls -f geeta -tl 2w -l 10", output)
+        self.assertIn('gmail 1 ls -c invoice -tl "jan 2025" -l 20', output)
+        self.assertIn("gmail 1 ls -snt -c proposal -tl 14d -l 10", output)
         self.assertIn("gmail 1 cn -e", output)
         self.assertNotIn("commands:", output)
         self.assertNotIn("usage:", output)
+
+    def test_help_topic_ls_shows_only_list_help(self) -> None:
+        with patch("sys.stdout", new=StringIO()) as stdout:
+            code = main(["-h", "ls"])
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn("gmail 1 ls -f geeta -tl 2w -l 10", output)
+        self.assertIn('gmail 1 ls -c invoice -tl "jan 2025" -l 20', output)
+        self.assertNotIn("gmail 1 s -e", output)
+        self.assertNotIn("gmail 1 cn -e", output)
+        self.assertNotIn("gmail sc", output)
+
+    def test_help_topic_send_shows_only_send_help(self) -> None:
+        with patch("sys.stdout", new=StringIO()) as stdout:
+            code = main(["-h", "s"])
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn('gmail 1 s "xyz@example.com" "Hello" "Body"', output)
+        self.assertIn('gmail 1 s "xyz@example.com" "Hello" -dp "/tmp/draft.txt"', output)
+        self.assertNotIn("gmail 1 ls -f geeta -tl 2w -l 10", output)
+        self.assertNotIn("gmail 1 cn -e", output)
+
+    def test_help_topic_sc_shows_global_and_preset_spam_clean(self) -> None:
+        with patch("sys.stdout", new=StringIO()) as stdout:
+            code = main(["-h", "sc"])
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn("gmail sc", output)
+        self.assertIn("gmail 1 sc", output)
+        self.assertNotIn("gmail 1 sa", output)
+        self.assertNotIn("gmail ti", output)
+
+    def test_help_topic_unknown_raises_usage_error(self) -> None:
+        with self.assertRaises(UsageError) as exc:
+            main(["-h", "nope"])
+        self.assertIn("Unknown help topic", str(exc.exception))
 
     def test_build_runtime_command_uses_launcher_only_when_frozen(self) -> None:
         with patch("sys.executable", "/tmp/gmail"), patch("sys.frozen", True, create=True):

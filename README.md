@@ -135,6 +135,7 @@ gmail <preset> r [-a] [-e] -t <thread_id> <body>|-dp <draft_path> [-cc <emails>]
 
 Help behavior:
 - `gmail -h`: shows full examples.
+- `gmail -h <topic>`: shows help for one command, for example `gmail -h ls`, `gmail -h s`, or `gmail -h sc`.
 - `gmail` (no args): shows the same full help as `-h`.
 
 Examples:
@@ -150,12 +151,13 @@ gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp
 gmail 1 s "xyz@example.com" "this is the subject" "this is the body" -atch "/tmp/notes.txt" "/tmp/project_dir"
 
 # List and audit messages
+gmail 1 ls -f geeta -tl 2w -l 10
+gmail 1 ls -c invoice -tl "jan 2025" -l 20
+gmail 1 ls -snt -c proposal -tl 14d -l 10
+gmail 1 ls -wa -f geeta -tl 2w -l 10
 gmail 1 ls -l 10
 gmail 1 ls -wa -l 10
-gmail 1 ls -wa -f geeta -tl 2w -l 10
 gmail 1 ls -f maanas -l 1
-gmail 1 ls -f xyz -l 5
-gmail 1 ls -f geeta -tl 2w -l 10
 gmail 1 ls -tl "jan 2025" -l 20
 gmail 1 ls -tl 2025-01-10..2025-01-20 -l 20
 gmail 1 ls -ur

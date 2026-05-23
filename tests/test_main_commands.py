@@ -65,7 +65,8 @@ class MainCommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         write_mock.assert_called_once()
         systemctl_mock.assert_any_call("daemon-reload")
-        systemctl_mock.assert_any_call("enable", "--now", "gmail.timer")
+        systemctl_mock.assert_any_call("enable", "gmail.timer")
+        systemctl_mock.assert_any_call("restart", "gmail.timer")
 
     def test_help_is_human_friendly(self) -> None:
         with patch("sys.stdout", new=StringIO()) as stdout:

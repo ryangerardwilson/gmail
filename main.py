@@ -1541,7 +1541,8 @@ def _systemctl_user(*args: str) -> subprocess.CompletedProcess[str]:
 def _install_timer() -> int:
     _write_timer_units()
     _systemctl_user("daemon-reload")
-    _systemctl_user("enable", "--now", f"{_gmail_unit_name()}.timer")
+    _systemctl_user("enable", f"{_gmail_unit_name()}.timer")
+    _systemctl_user("restart", f"{_gmail_unit_name()}.timer")
     print(f"timer enabled: {_gmail_unit_name()}.timer")
     return 0
 

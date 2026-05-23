@@ -127,7 +127,7 @@ Adjust structure if needed, but preserve separation of concerns.
 - CLI supports send/list/reply for configured Gmail presets.
 - Works with at least two configured accounts.
 - Global `sc` runs spam cleanup across all configured presets.
-- `ti` installs one hourly user timer that runs the same global spam cleanup command and sends a success notification through `notify-send`.
+- `ti` installs one hourly user timer that runs the same global spam cleanup command and sends a success notification through the Quickshell bar, with `notify-send` only as a fallback.
 - Config path resolution is XDG-compliant.
 - `ls -l 10`, `ls -wa -l 10`, `ls -f maanas -l 1`, `ls -c invoice -l 10`, `ls -f geeta -tl 2w -l 10`, and `ls -tl "jan 2025" -l 20` work.
 - Tests for core parsing/config logic pass locally.

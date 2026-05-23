@@ -45,8 +45,8 @@ source ~/.bashrc
 
 ## External dependencies
 
-- `notify-send` for timer success notifications
-- a notification daemon such as Mako to display those notifications
+- Quickshell with the `omarchy-bar` IPC toast endpoint for timer success notifications
+- `notify-send` as a fallback when the Quickshell bar is not running
 
 ## Config
 
@@ -241,7 +241,7 @@ Spam flow commands:
 
 ## Timer
 
-`ti` writes one global user service to `~/.config/systemd/user/` and enables an hourly timer that runs `gmail sc` across all presets. On success, the service sends a desktop notification through `notify-send` for Mako.
+`ti` writes one global user service to `~/.config/systemd/user/` and enables an hourly timer that runs `gmail sc` across all presets. On success, the service sends a desktop notification through the Quickshell bar, falling back to `notify-send` when the bar is unavailable.
 
 ```bash
 gmail ti

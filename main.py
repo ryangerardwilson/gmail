@@ -1462,6 +1462,30 @@ def _build_runtime_command(*args: str) -> str:
     return " ".join(command_parts)
 
 
+def _build_notification_command(summary: str, body: str, urgency: str = "normal") -> str:
+    notify_function = " ".join(
+        [
+            "notify() {",
+            'summary="$1";',
+            'body="${2:-}";',
+            'urgency="${3:-normal}";',
+            'qs="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/omarchy-bar";',
+            'if command -v quickshell >/dev/null 2>&1 && quickshell ipc -p "$qs" call bar notify "$summary" "$body" "$urgency" >/dev/null 2>&1; then return 0; fi;',
+            'if command -v notify-send >/dev/null 2>&1; then notify-send -a "$summary" -u "$urgency" "$summary" "$body" || true; fi;',
+            "};",
+        ]
+    )
+    return " ".join(
+        [
+            notify_function,
+            "notify",
+            shlex.quote(summary),
+            shlex.quote(body),
+            shlex.quote(urgency),
+        ]
+    )
+
+
 def _write_timer_units() -> None:
     systemd_dir = Path.home() / ".config" / "systemd" / "user"
     systemd_dir.mkdir(parents=True, exist_ok=True)
@@ -1469,7 +1493,10 @@ def _write_timer_units() -> None:
     timer_path = systemd_dir / f"{_gmail_unit_name()}.timer"
     entrypoint = Path(__file__).resolve()
     run_command = _build_runtime_command("sc")
-    notify_command = "notify-send 'gmail' 'Hourly spam clean finished successfully'"
+    notify_command = _build_notification_command(
+        "gmail",
+        "Hourly spam clean finished successfully",
+    )
     service_body = "\n".join(
         [
             "[Unit]",

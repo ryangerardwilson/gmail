@@ -1516,6 +1516,7 @@ def _write_timer_units() -> None:
             "",
             "[Timer]",
             "OnBootSec=5m",
+            "OnActiveSec=5m",
             "OnUnitActiveSec=1h",
             "Persistent=true",
             "",

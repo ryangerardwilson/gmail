@@ -135,11 +135,14 @@ class MainCommandTests(unittest.TestCase):
 
                 _write_timer_units()
             service_path = home / ".config" / "systemd" / "user" / "gmail.service"
+            timer_path = home / ".config" / "systemd" / "user" / "gmail.timer"
             service_body = service_path.read_text(encoding="utf-8")
+            timer_body = timer_path.read_text(encoding="utf-8")
             self.assertIn("ExecStart=/usr/bin/env bash -lc '/tmp/gmail sc &&", service_body)
             self.assertNotIn("main.py sc", service_body)
             self.assertIn("quickshell ipc -p \"$qs\" call bar notify", service_body)
             self.assertIn("notify-send", service_body)
+            self.assertIn("OnActiveSec=5m", timer_body)
 
     def test_main_global_sc_rejects_extra_args(self) -> None:
         with self.assertRaises(UsageError):

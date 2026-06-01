@@ -61,12 +61,12 @@ ANSI_RESET = "\033[0m"
 INSTALL_SCRIPT_URL = "https://raw.githubusercontent.com/ryangerardwilson/gmail/main/install.sh"
 HELP_TEXT = """Gmail CLI
 
-flags:
-  gmail -h
+global actions:
+  gmail help
     show this help
-  gmail -v
+  gmail version
     print the installed version
-  gmail -u
+  gmail upgrade
     upgrade to the latest release
 
 features:
@@ -132,7 +132,7 @@ def _upgrade_app() -> int:
     try:
         script_path.chmod(0o700)
         result = subprocess.run(
-            ["/usr/bin/env", "bash", str(script_path), "-u"],
+            ["/usr/bin/env", "bash", str(script_path), "upgrade"],
             check=False,
             text=True,
             env=os.environ.copy(),
@@ -1783,9 +1783,9 @@ def _dispatch(argv: list[str]) -> int:
     if first in {"conf", "sc", "ti", "td", "st"}:
         raise UsageError("Use declarative commands: gmail config, gmail spam clean, or gmail timer install|disable|status")
     if not first.isdigit():
-        raise UsageError("Expected: gmail <preset> <command>. Use gmail -h for examples.")
+        raise UsageError("Expected: gmail <preset> <command>. Use gmail help for examples.")
     if len(argv) < 2:
-        raise UsageError("Expected: gmail <preset> <command>. Use gmail -h for examples.")
+        raise UsageError("Expected: gmail <preset> <command>. Use gmail help for examples.")
 
     config = load_config()
     account = get_account(config, first)
@@ -1793,7 +1793,7 @@ def _dispatch(argv: list[str]) -> int:
     command = argv[1].lower()
     params = argv[2:]
     if _is_legacy_gmail_command(command):
-        raise UsageError("Use declarative commands. Run: gmail -h")
+        raise UsageError("Use declarative commands. Run: gmail help")
     if command == "contacts":
         return _handle_contacts(config, account, _parse_contacts_declarative(params))
 
@@ -1887,15 +1887,15 @@ def main(argv: list[str] | None = None) -> int:
     if not args:
         _print_help()
         return 0
-    if args == ["-h"]:
+    if args == ["help"]:
         _print_help()
         return 0
-    if args == ["-v"]:
+    if args == ["version"]:
         print(__version__)
         return 0
-    if args == ["-u"]:
+    if args == ["upgrade"]:
         return _upgrade_app()
-    if args[0] in {"-h", "-v", "-u"}:
+    if args[0] in {"help", "version", "upgrade"}:
         raise UsageError(f"Use: gmail {args[0]}")
     return _dispatch(args)
 

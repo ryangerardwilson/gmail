@@ -70,7 +70,7 @@ class MainCommandTests(unittest.TestCase):
 
     def test_help_is_human_friendly(self) -> None:
         with patch("sys.stdout", new=StringIO()) as stdout:
-            code = main(["-h"])
+            code = main(["help"])
         self.assertEqual(code, 0)
         output = stdout.getvalue()
         self.assertIn("Gmail CLI", output)
@@ -86,8 +86,8 @@ class MainCommandTests(unittest.TestCase):
 
     def test_help_extra_args_raise_usage_error(self) -> None:
         with self.assertRaises(UsageError) as exc:
-            main(["-h", "nope"])
-        self.assertIn("Use: gmail -h", str(exc.exception))
+            main(["help", "nope"])
+        self.assertIn("Use: gmail help", str(exc.exception))
 
     def test_build_runtime_command_uses_launcher_only_when_frozen(self) -> None:
         with patch("sys.executable", "/tmp/gmail"), patch("sys.frozen", True, create=True):
@@ -700,7 +700,7 @@ class MainCommandTests(unittest.TestCase):
 
     def test_upgrade_rejects_extra_args(self) -> None:
         with self.assertRaises(UsageError):
-            main(["-u", "3"])
+            main(["upgrade", "3"])
 
     def test_spam_adds_spam_senders(self) -> None:
         with patch("main.load_config") as load_config_mock, patch(

@@ -5,19 +5,19 @@ Gmail-only CLI for account presets, sending mail, listing/searching mail, replyi
 ## Install
 
 ```sh
-./install.sh -h
-./install.sh -v
-./install.sh -u
+./install.sh help
+./install.sh version
+./install.sh upgrade
 ```
 
-The installed launcher is written to `~/.local/bin/gmail`. `gmail -v` prints the runtime version from `_version.py`; source checkouts keep `0.0.0` until release automation stamps an artifact.
+The installed launcher is written to `~/.local/bin/gmail`. `gmail version` prints the runtime version from `_version.py`; source checkouts keep `0.0.0` until release automation stamps an artifact.
 
 ## Commands
 
 ```sh
-gmail -h
-gmail -v
-gmail -u
+gmail help
+gmail version
+gmail upgrade
 
 gmail auth ~/Documents/credentials/client_secret.json
 gmail config

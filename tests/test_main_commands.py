@@ -52,7 +52,7 @@ class MainCommandTests(unittest.TestCase):
         ) as service_mock, patch(
             "main.run_cleanup_for_account", side_effect=[result1, result2]
         ) as cleanup_mock:
-            code = main(["sc"])
+            code = main(["spam", "clean"])
         self.assertEqual(code, 0)
         self.assertEqual(service_mock.call_count, 2)
         self.assertEqual(cleanup_mock.call_count, 2)
@@ -61,7 +61,7 @@ class MainCommandTests(unittest.TestCase):
         with patch("main._write_timer_units") as write_mock, patch(
             "main._systemctl_user"
         ) as systemctl_mock:
-            code = main(["ti"])
+            code = main(["timer", "install"])
         self.assertEqual(code, 0)
         write_mock.assert_called_once()
         systemctl_mock.assert_any_call("daemon-reload")
@@ -75,56 +75,23 @@ class MainCommandTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("Gmail CLI", output)
         self.assertIn("features:", output)
-        self.assertIn("gmail -h <topic>", output)
-        self.assertIn("# gmail auth <client_secret_path>", output)
-        self.assertIn("# gmail <preset> s|ls|o|r ...", output)
-        self.assertIn("# gmail sc | gmail ti | gmail td | gmail st | gmail <preset> si|sc|sa|se", output)
-        self.assertIn("gmail 1 ls -f geeta -tl 2w -l 10", output)
-        self.assertIn('gmail 1 ls -c invoice -tl "jan 2025" -l 20', output)
-        self.assertIn("gmail 1 ls -snt -c proposal -tl 14d -l 10", output)
-        self.assertIn("gmail 1 cn -e", output)
+        self.assertIn("# auth <client_secret_path>", output)
+        self.assertIn("# <preset> send to <email|alias> subject <subject> body <body>", output)
+        self.assertIn("# spam clean | timer install|disable|status", output)
+        self.assertIn("gmail 1 list unread from geeta since 2w limit 10", output)
+        self.assertIn("gmail 1 list sent containing proposal since 14d limit 10", output)
+        self.assertIn("gmail 1 contacts edit", output)
         self.assertNotIn("commands:", output)
         self.assertNotIn("usage:", output)
 
-    def test_help_topic_ls_shows_only_list_help(self) -> None:
-        with patch("sys.stdout", new=StringIO()) as stdout:
-            code = main(["-h", "ls"])
-        self.assertEqual(code, 0)
-        output = stdout.getvalue()
-        self.assertIn("gmail 1 ls -f geeta -tl 2w -l 10", output)
-        self.assertIn('gmail 1 ls -c invoice -tl "jan 2025" -l 20', output)
-        self.assertNotIn("gmail 1 s -e", output)
-        self.assertNotIn("gmail 1 cn -e", output)
-        self.assertNotIn("gmail sc", output)
-
-    def test_help_topic_send_shows_only_send_help(self) -> None:
-        with patch("sys.stdout", new=StringIO()) as stdout:
-            code = main(["-h", "s"])
-        self.assertEqual(code, 0)
-        output = stdout.getvalue()
-        self.assertIn('gmail 1 s "xyz@example.com" "Hello" "Body"', output)
-        self.assertIn('gmail 1 s "xyz@example.com" "Hello" -dp "/tmp/draft.txt"', output)
-        self.assertNotIn("gmail 1 ls -f geeta -tl 2w -l 10", output)
-        self.assertNotIn("gmail 1 cn -e", output)
-
-    def test_help_topic_sc_shows_global_and_preset_spam_clean(self) -> None:
-        with patch("sys.stdout", new=StringIO()) as stdout:
-            code = main(["-h", "sc"])
-        self.assertEqual(code, 0)
-        output = stdout.getvalue()
-        self.assertIn("gmail sc", output)
-        self.assertIn("gmail 1 sc", output)
-        self.assertNotIn("gmail 1 sa", output)
-        self.assertNotIn("gmail ti", output)
-
-    def test_help_topic_unknown_raises_usage_error(self) -> None:
+    def test_help_extra_args_raise_usage_error(self) -> None:
         with self.assertRaises(UsageError) as exc:
             main(["-h", "nope"])
-        self.assertIn("Unknown help topic", str(exc.exception))
+        self.assertIn("Use: gmail -h", str(exc.exception))
 
     def test_build_runtime_command_uses_launcher_only_when_frozen(self) -> None:
         with patch("sys.executable", "/tmp/gmail"), patch("sys.frozen", True, create=True):
-            self.assertEqual(_build_runtime_command("sc"), "/tmp/gmail sc")
+            self.assertEqual(_build_runtime_command("spam", "clean"), "/tmp/gmail spam clean")
 
     def test_write_timer_units_uses_launcher_only_when_frozen(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -139,15 +106,15 @@ class MainCommandTests(unittest.TestCase):
             timer_path = home / ".config" / "systemd" / "user" / "gmail.timer"
             service_body = service_path.read_text(encoding="utf-8")
             timer_body = timer_path.read_text(encoding="utf-8")
-            self.assertIn("ExecStart=/usr/bin/env bash -lc '/tmp/gmail sc &&", service_body)
-            self.assertNotIn("main.py sc", service_body)
+            self.assertIn("ExecStart=/usr/bin/env bash -lc '/tmp/gmail spam clean &&", service_body)
+            self.assertNotIn("main.py spam clean", service_body)
             self.assertIn("quickshell ipc -p \"$qs\" call bar notify", service_body)
             self.assertIn("notify-send", service_body)
             self.assertIn("OnActiveSec=5m", timer_body)
 
     def test_main_global_sc_rejects_extra_args(self) -> None:
         with self.assertRaises(UsageError):
-            main(["sc", "extra"])
+            main(["spam", "clean", "extra"])
 
     def test_parse_editor_template(self) -> None:
         content = "\n".join(
@@ -295,7 +262,7 @@ class MainCommandTests(unittest.TestCase):
                 _handle_reply(service, "me@example.com", ["-e", "thread_like_id"], "sig", {})
         printed = "\n".join(str(call.args[0]) for call in print_mock.call_args_list if call.args)
         self.assertIn("editor_draft_recovery:", printed)
-        self.assertIn("hint: if this id is a thread id, use: r -e -t <thread_id>", printed)
+        self.assertIn("hint: if this id is a thread id, use: reply to thread <thread_id> in editor", printed)
         self.assertIn("Reply body", printed)
 
     def test_handle_reply_appends_signature(self) -> None:
@@ -346,7 +313,7 @@ class MainCommandTests(unittest.TestCase):
         self.assertEqual(args[2], "xyz@hbc.com")
         self.assertEqual(kwargs["cc_emails"], ["team@example.com", "person@example.com"])
 
-    def test_cn_add_contact(self) -> None:
+    def test_contacts_add_contact(self) -> None:
         with patch("main.load_config") as load_config_mock, patch(
             "main.get_account"
         ) as get_account_mock, patch("main.build_gmail_service"), patch(
@@ -362,7 +329,7 @@ class MainCommandTests(unittest.TestCase):
                 signature_file=MagicMock(),
                 contacts={"old": "old@example.com"},
             )
-            code = main(["1", "cn", "-a", "silvia", "xyz@hbc.com"])
+            code = main(["1", "contacts", "add", "silvia", "xyz@hbc.com"])
         self.assertEqual(code, 0)
         update_mock.assert_called_once_with(
             Path("/tmp/config.json"),
@@ -370,7 +337,7 @@ class MainCommandTests(unittest.TestCase):
             {"old": "old@example.com", "silvia": "xyz@hbc.com"},
         )
 
-    def test_cn_delete_contact(self) -> None:
+    def test_contacts_delete_contact(self) -> None:
         with patch("main.load_config") as load_config_mock, patch(
             "main.get_account"
         ) as get_account_mock, patch("main.build_gmail_service"), patch(
@@ -386,11 +353,11 @@ class MainCommandTests(unittest.TestCase):
                 signature_file=MagicMock(),
                 contacts={"silvia": "xyz@hbc.com"},
             )
-            code = main(["1", "cn", "-d", "silvia"])
+            code = main(["1", "contacts", "delete", "silvia"])
         self.assertEqual(code, 0)
         update_mock.assert_called_once_with(Path("/tmp/config.json"), "1", {})
 
-    def test_cn_list_no_contacts(self) -> None:
+    def test_contacts_list_no_contacts(self) -> None:
         with patch("main.load_config") as load_config_mock, patch(
             "main.get_account"
         ) as get_account_mock, patch("main.build_gmail_service"), patch(
@@ -406,7 +373,7 @@ class MainCommandTests(unittest.TestCase):
                 signature_file=MagicMock(),
                 contacts={},
             )
-            code = main(["1", "cn"])
+            code = main(["1", "contacts", "list"])
         self.assertEqual(code, 0)
 
     def test_handle_list_unread_default_limit(self) -> None:
@@ -732,10 +699,10 @@ class MainCommandTests(unittest.TestCase):
         delete_mock.assert_called_once_with(service, "m1")
 
     def test_upgrade_rejects_extra_args(self) -> None:
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(UsageError):
             main(["-u", "3"])
 
-    def test_sa_adds_spam_senders(self) -> None:
+    def test_spam_adds_spam_senders(self) -> None:
         with patch("main.load_config") as load_config_mock, patch(
             "main.get_account"
         ) as get_account_mock, patch("main.build_gmail_service"), patch(
@@ -751,11 +718,11 @@ class MainCommandTests(unittest.TestCase):
                 signature_file=MagicMock(),
                 spam_senders=["old@spam.com"],
             )
-            code = main(["1", "sa", "new@spam.com,old@spam.com"])
+            code = main(["1", "spam", "add", "new@spam.com,old@spam.com"])
         self.assertEqual(code, 0)
         update_mock.assert_called_once()
 
-    def test_se_adds_spam_excludes(self) -> None:
+    def test_spam_allow_adds_spam_excludes(self) -> None:
         with patch("main.load_config") as load_config_mock, patch(
             "main.get_account"
         ) as get_account_mock, patch("main.build_gmail_service"), patch(
@@ -771,7 +738,7 @@ class MainCommandTests(unittest.TestCase):
                 signature_file=MagicMock(),
                 spam_excludes=["old@example.com"],
             )
-            code = main(["1", "se", "trusted@example.com,old@example.com"])
+            code = main(["1", "spam", "allow", "trusted@example.com,old@example.com"])
         self.assertEqual(code, 0)
         update_mock.assert_called_once_with(
             Path("/tmp/config.json"),
@@ -779,7 +746,7 @@ class MainCommandTests(unittest.TestCase):
             ["old@example.com", "trusted@example.com"],
         )
 
-    def test_se_adds_spam_exclude_domains(self) -> None:
+    def test_spam_allow_adds_spam_exclude_domains(self) -> None:
         with patch("main.load_config") as load_config_mock, patch(
             "main.get_account"
         ) as get_account_mock, patch("main.build_gmail_service"), patch(
@@ -795,7 +762,7 @@ class MainCommandTests(unittest.TestCase):
                 signature_file=MagicMock(),
                 spam_excludes=[],
             )
-            code = main(["1", "se", "@blocked.com,@another.com"])
+            code = main(["1", "spam", "allow", "@blocked.com,@another.com"])
         self.assertEqual(code, 0)
         update_mock.assert_called_once_with(
             Path("/tmp/config.json"),
@@ -856,7 +823,7 @@ class MainCommandTests(unittest.TestCase):
                     )
                 ]
             )
-            code = main(["1", "sa", "-ur"])
+            code = main(["1", "spam", "add", "unread"])
 
         self.assertEqual(code, 0)
         update_payload = update_mock.call_args.args[1]

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from email.utils import parseaddr
 import os
 from pathlib import Path
@@ -9,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.request
 
 from _version import __version__
 from gmail_cli.auth import authorize_account, build_gmail_service
@@ -53,417 +53,93 @@ from gmail_cli.spam_flow import (
     run_cleanup_for_account,
     run_identify_for_account,
 )
-from rgw_cli_contract import AppSpec, resolve_install_script_path, run_app
 
 _TRAILING_OPTIONS = {"-cc", "-bcc", "-atch", "-dp"}
-GLOBAL_COMMANDS = {"conf", "sc", "ti", "td", "st"}
-INSTALL_SCRIPT = resolve_install_script_path(__file__)
+_DECLARATIVE_TRAILING_OPTIONS = {"cc", "bcc", "attach"}
+ANSI_GRAY = "\033[38;5;245m"
+ANSI_RESET = "\033[0m"
+INSTALL_SCRIPT_URL = "https://raw.githubusercontent.com/ryangerardwilson/gmail/main/install.sh"
 HELP_TEXT = """Gmail CLI
 
 flags:
   gmail -h
     show this help
-  gmail -h <topic>
-    show help for one command like ls, s, r, sc, or cn
   gmail -v
     print the installed version
   gmail -u
     upgrade to the latest release
-  gmail conf
-    open the config in $VISUAL/$EDITOR to edit settings such as signature_file
 
 features:
   authorize a Google account and save or refresh its preset
-  # gmail auth <client_secret_path>
+  # auth <client_secret_path>
   gmail auth ~/Documents/credentials/client_secret.json
 
-  drill into help for one command only
-  # gmail -h <topic>
-  gmail -h ls
-  gmail -h s
-  gmail -h sc
+  edit account config, including signature_file paths used for automatic send/reply signatures
+  # config
+  gmail config
 
-  send email, search by sender/content/time, open messages, and reply from a configured preset
-  # gmail <preset> s|ls|o|r ...
-  gmail 1 s -e
-  gmail 1 ls -f geeta -tl 2w -l 10
-  gmail 1 ls -c invoice -tl "jan 2025" -l 20
-  gmail 1 ls -snt -c proposal -tl 14d -l 10
-  gmail 1 o "19caef2cd6494116"
-  gmail 1 r -e "19caef2cd6494116"
+  send a new email, with optional editor mode, cc, bcc, and attachments
+  # <preset> send to <email|alias> subject <subject> body <body> [cc <emails>] [bcc <emails>] [attach <path> ...]
+  gmail 1 send in editor
+  gmail 1 send to person@example.com subject "Hello" body "Body"
+  gmail 1 send to boss subject "Notes" body "Draft is attached" attach ~/notes.txt
 
-  clean spam, manage sender lists, and control the hourly timer
-  # gmail sc | gmail ti | gmail td | gmail st | gmail <preset> si|sc|sa|se
-  gmail sc
-  gmail ti
-  gmail 1 si
-  gmail 1 sa "spam1@example.com,spam2@example.com"
+  list and search messages using explicit filters
+  # <preset> list [unread|read|sent|starred|external] [from <sender>] [containing <text>] [since <window>] [limit <count>] [with attachments] [open]
+  gmail 1 list unread from geeta since 2w limit 10
+  gmail 1 list sent containing proposal since 14d limit 10
+  gmail 1 list with attachments from geeta limit 10
+
+  open messages and reply to messages or threads
+  # <preset> open message <id> | <preset> open thread <id>
+  gmail 1 open message 19caef2cd6494116
+  # <preset> reply to <message_id> [all] [in editor|body <body>]
+  gmail 1 reply to 19caef2cd6494116 body "Thanks for the update."
+  gmail 1 reply to thread 19ca756c06a7ebcd all body "Thanks everyone."
+
+  clean spam, inspect spam candidates, and control the hourly timer
+  # spam clean | timer install|disable|status | <preset> spam inspect|clean|add|allow
+  gmail spam clean
+  gmail timer install
+  gmail 1 spam inspect
+  gmail 1 spam add unread
+  gmail 1 spam allow trusted@example.com
 
   manage saved contacts for a preset
-  # gmail <preset> cn | cn -a <alias> <email> | cn -d <alias> | cn -e
-  gmail 1 cn
-  gmail 1 cn -a boss boss@example.com
-  gmail 1 cn -e
+  # <preset> contacts list|add|delete|edit
+  gmail 1 contacts list
+  gmail 1 contacts add boss boss@example.com
+  gmail 1 contacts edit
 """
 
-_HELP_TOPIC_ORDER = [
-    "auth",
-    "conf",
-    "s",
-    "ls",
-    "r",
-    "o",
-    "mr",
-    "mra",
-    "mur",
-    "mstr",
-    "mustr",
-    "d",
-    "ms",
-    "si",
-    "sc",
-    "sa",
-    "se",
-    "ti",
-    "td",
-    "st",
-    "cn",
-]
 
-_HELP_TOPIC_ALIASES = {
-    "-s": "s",
-}
-
-_HELP_TOPICS: dict[str, list[str]] = {
-    "auth": [
-        "  authorize a Google account and save or refresh its preset",
-        "  # gmail auth <client_secret_path>",
-        "  gmail auth ~/Documents/credentials/client_secret.json",
-    ],
-    "conf": [
-        "  open the config in $VISUAL/$EDITOR so you can edit settings such as signature_file",
-        "  # gmail conf",
-        "  gmail conf",
-    ],
-    "s": [
-        "  send a new email, with optional editor mode, cc, bcc, and attachments; the configured signature is appended automatically",
-        "  # gmail <preset> s [-e]|<to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> ...]",
-        "  gmail 1 s -e",
-        "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\"",
-        "  gmail 1 s \"xyz@example.com\" \"Hello\" -dp \"/tmp/draft.txt\"",
-        "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -cc \"cc1@example.com,cc2@example.com\" -bcc \"audit@example.com\"",
-        "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
-    ],
-    "ls": [
-        "  search inbox and sent mail by sender, content, attachments, or time window; optionally open matches or inspect unread, read, starred, sent, attachment-bearing, or thread-specific results",
-        "  # gmail <preset> ls [-o] [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
-        "  gmail 1 ls -f geeta -tl 2w -l 10",
-        "  gmail 1 ls -c invoice -tl \"jan 2025\" -l 20",
-        "  gmail 1 ls -snt -c proposal -tl 14d -l 10",
-        "  gmail 1 ls -wa -f geeta -tl 2w -l 10",
-        "  gmail 1 ls -o -f xyz@example.com -l 1",
-        "  gmail 1 ls -ur",
-        "  gmail 1 ls -t \"19ca756c06a7ebcd\"",
-    ],
-    "r": [
-        "  reply to a message or thread, with optional reply-all, editor mode, cc, bcc, and attachments; the configured signature is appended automatically",
-        "  # gmail <preset> r [-a] [-e] <message_id|thread_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> ...]",
-        "  gmail 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
-        "  gmail 1 r \"19caef2cd6494116\" -dp \"/tmp/reply.txt\"",
-        "  gmail 1 r -e \"19caef2cd6494116\"",
-        "  gmail 1 r -a \"19caef2cd6494116\" \"Thanks all.\"",
-        "  gmail 1 r -t \"19ca756c06a7ebcd\" \"Following up on this thread.\"",
-    ],
-    "o": [
-        "  open a message or thread, mark the opened messages as read, and download any attachments into the current working directory",
-        "  # gmail <preset> o <message_id>",
-        "  gmail 1 o \"19caef2cd6494116\"",
-        "  # gmail <preset> o -t <thread_id>",
-        "  gmail 1 o -t \"19ca756c06a7ebcd\"",
-    ],
-    "mr": [
-        "  mark one message as read",
-        "  # gmail <preset> mr <message_id>",
-        "  gmail 1 mr \"19caef2cd6494116\"",
-    ],
-    "mra": [
-        "  mark every unread message in the preset as read",
-        "  # gmail <preset> mra",
-        "  gmail 1 mra",
-    ],
-    "mur": [
-        "  mark one message as unread",
-        "  # gmail <preset> mur <message_id>",
-        "  gmail 1 mur \"19caef2cd6494116\"",
-    ],
-    "mstr": [
-        "  star one message",
-        "  # gmail <preset> mstr <message_id>",
-        "  gmail 1 mstr \"19caef2cd6494116\"",
-    ],
-    "mustr": [
-        "  remove the star from one message",
-        "  # gmail <preset> mustr <message_id>",
-        "  gmail 1 mustr \"19caef2cd6494116\"",
-    ],
-    "d": [
-        "  delete one message by message id",
-        "  # gmail <preset> d <message_id>",
-        "  gmail 1 d \"19caef2cd6494116\"",
-    ],
-    "ms": [
-        "  add the sender from one message to the preset spam list and trash that message immediately",
-        "  # gmail <preset> ms <message_id>",
-        "  gmail 1 ms \"19caef2cd6494116\"",
-    ],
-    "si": [
-        "  inspect unread non-gmail senders for one preset and interactively add likely spam senders to that preset's spam list",
-        "  # gmail <preset> si",
-        "  gmail 1 si",
-    ],
-    "sc": [
-        "  clean spam either across every configured preset or for one specific preset",
-        "  # gmail sc",
-        "  gmail sc",
-        "  # gmail <preset> sc",
-        "  gmail 1 sc",
-    ],
-    "sa": [
-        "  add spam senders or domains to one preset, or add all current unread senders and trash those unread messages with -ur",
-        "  # gmail <preset> sa <spam_email1,spam_email2,...>|-ur",
-        "  gmail 1 sa \"spam1@example.com,spam2@example.com\"",
-        "  gmail 1 sa \"@domain1.com,@domain2.com\"",
-        "  gmail 1 sa -ur",
-    ],
-    "se": [
-        "  add senders or domains to one preset's spam exclude list",
-        "  # gmail <preset> se <email1,email2,...>",
-        "  gmail 1 se \"trusted1@example.com,trusted2@example.com\"",
-        "  gmail 1 se \"@trusted-domain.com\"",
-    ],
-    "ti": [
-        "  install and start the hourly spam-clean timer",
-        "  # gmail ti",
-        "  gmail ti",
-    ],
-    "td": [
-        "  disable and stop the hourly spam-clean timer",
-        "  # gmail td",
-        "  gmail td",
-    ],
-    "st": [
-        "  show the current status of the hourly spam-clean timer",
-        "  # gmail st",
-        "  gmail st",
-    ],
-    "cn": [
-        "  list, add, delete, or edit saved contact aliases for one preset",
-        "  # gmail <preset> cn | cn -a <alias> <email> | cn -d <alias> | cn -e",
-        "  gmail 1 cn",
-        "  gmail 1 cn -a \"silvia\" \"xyz@hbc.com\"",
-        "  gmail 1 cn -d \"silvia\"",
-        "  gmail 1 cn -e",
-    ],
-}
+def _muted(text: str) -> str:
+    if not sys.stdout.isatty() or "NO_COLOR" in os.environ:
+        return text
+    return f"{ANSI_GRAY}{text}{ANSI_RESET}"
 
 
-def _comment_help_line(line: str) -> str:
-    if not line:
-        return line
-    stripped = line.lstrip()
-    if stripped in {"Gmail CLI", "flags:", "features:"}:
-        return line
-    if stripped.startswith("#") or stripped.startswith("gmail "):
-        return line
-    indent = line[: len(line) - len(stripped)]
-    return f"{indent}# {stripped}"
+def _print_help() -> None:
+    print(_muted(HELP_TEXT.rstrip()))
 
 
-def _supported_help_topics() -> str:
-    return ", ".join(_HELP_TOPIC_ORDER)
-
-
-def _print_help_topic(topic: str) -> int:
-    canonical = _HELP_TOPIC_ALIASES.get(topic.lower(), topic.lower())
-    topic_lines = _HELP_TOPICS.get(canonical)
-    if topic_lines is None:
-        raise UsageError(
-            f"Unknown help topic '{topic}'. Known topics: {_supported_help_topics()}"
+def _upgrade_app() -> int:
+    with urllib.request.urlopen(INSTALL_SCRIPT_URL) as response:
+        script_body = response.read()
+    with tempfile.NamedTemporaryFile(delete=False) as handle:
+        handle.write(script_body)
+        script_path = Path(handle.name)
+    try:
+        script_path.chmod(0o700)
+        result = subprocess.run(
+            ["/usr/bin/env", "bash", str(script_path), "-u"],
+            check=False,
+            text=True,
+            env=os.environ.copy(),
         )
-    lines = ["Gmail CLI", "", "features:", *topic_lines]
-    print("\n".join(_comment_help_line(line) for line in lines))
-    return 0
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Gmail CLI",
-        add_help=False,
-        usage=(
-            "gmail -v\n"
-            "gmail -u\n"
-            "gmail conf\n"
-            "gmail auth <client_secret_path>\n"
-            "gmail sc\n"
-            "gmail ti\n"
-            "gmail td\n"
-            "gmail st\n"
-            "gmail <preset> si\n"
-            "gmail <preset> sc\n"
-            "gmail <preset> sa <spam_email1,spam_email2,...>\n"
-            "gmail <preset> se <email1,email2,...>\n"
-            "gmail <preset> sa -ur\n"
-            "gmail <preset> cn\n"
-            "gmail <preset> cn -a <alias> <email>\n"
-            "gmail <preset> cn -d <alias>\n"
-            "gmail <preset> cn -e\n"
-            "gmail <preset> o <message_id>\n"
-            "gmail <preset> o -t <thread_id>\n"
-            "gmail <preset> mr <message_id>\n"
-            "gmail <preset> mra\n"
-            "gmail <preset> mur <message_id>\n"
-            "gmail <preset> mstr <message_id>\n"
-            "gmail <preset> mustr <message_id>\n"
-            "gmail <preset> d <message_id>\n"
-            "gmail <preset> ms <message_id>\n"
-            "gmail <preset> s -e\n"
-            "gmail <preset> s <to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
-            "gmail <preset> ls [-o] [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]\n"
-            "gmail <preset> ls [-o] -ur [-l <limit>]\n"
-            "gmail <preset> ls [-o] -r [-l <limit>]\n"
-            "gmail <preset> ls [-o] -str [-l <limit>]\n"
-            "gmail <preset> ls [-o] -ext [-l <limit>]\n"
-            "gmail <preset> ls [-o] -snt [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]\n"
-            "gmail <preset> ls -ura [-l <limit>]\n"
-            "gmail <preset> ls -ra [-l <limit>]\n"
-            "gmail <preset> ls [-o] -t <thread_id>\n"
-            "gmail <preset> r [-a] [-e] <message_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]\n"
-            "gmail <preset> r [-a] [-e] -t <thread_id> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> [<path> ...]]"
-        ),
-    )
-    parser.add_argument(
-        "preset", nargs="?", help="Account preset key from config.json, e.g. 1"
-    )
-    parser.add_argument("command", nargs="?", help="Command: s | -s | ls | r | o | mr | mra | mur | mstr | mustr | d | ms | si | sc | sa | se | cn")
-    parser.add_argument("params", nargs=argparse.REMAINDER, help="Command parameters")
-    return parser
-
-
-def _print_usage_guide(show_examples: bool = True, show_usage: bool = True) -> None:
-    lines: list[str] = [
-        "Gmail CLI",
-        "",
-        "flags:",
-        "  gmail -h",
-        "    show this help",
-        "  gmail -h <topic>",
-        "    show help for one command like ls, s, r, sc, or cn",
-        "  gmail -v",
-        "    print the installed version",
-        "  gmail -u",
-        "    upgrade to the latest release",
-        "  gmail conf",
-        "    open the config in $VISUAL/$EDITOR to edit settings such as signature_file",
-    ]
-    if show_examples:
-        lines.extend(
-            [
-                "",
-                "features:",
-                "  authorize a Google account and save or refresh its preset",
-                "  # auth <client_secret_path>",
-                "  gmail auth ~/Documents/credentials/client_secret.json",
-                "",
-                "  drill into help for one command only",
-                "  # -h <topic>",
-                "  gmail -h ls",
-                "  gmail -h s",
-                "  gmail -h sc",
-                "",
-                "  edit account config, including signature_file paths used for automatic send/reply signatures",
-                "  # conf",
-                "  gmail conf",
-                "",
-                "  send a new email, with optional editor mode, cc, bcc, and attachments; the configured signature is appended automatically",
-                "  # <preset> s [-e]|<to> <subject> <body>|-dp <draft_path> [-cc <emails>] [-bcc <emails>] [-atch <path> ...]",
-                "  gmail 1 s -e",
-                "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\"",
-                "  gmail 1 s \"xyz@example.com\" \"Hello\" -dp \"/tmp/draft.txt\"",
-                "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -cc \"cc1@example.com,cc2@example.com\" -bcc \"audit@example.com\"",
-                "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\"",
-                "  gmail 1 s \"xyz@example.com\" \"Hello\" \"Body\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
-                "",
-                "  search inbox and sent mail by sender, content, attachments, or time window; then open or audit the matching messages",
-                "  # <preset> ls [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]|-ur|-r|-str|-ext|-snt|-ura|-ra|-t ...",
-                "  gmail 1 ls -f geeta -tl 2w -l 10",
-                "  gmail 1 ls -c invoice -tl \"jan 2025\" -l 20",
-                "  gmail 1 ls -snt -c proposal -tl 14d -l 10",
-                "  gmail 1 ls -wa -f geeta -tl 2w -l 10",
-                "  gmail 1 ls -l 10",
-                "  gmail 1 ls -wa -l 10",
-                "  gmail 1 ls -tl \"jan 2025\" -l 20",
-                "  gmail 1 ls -ur",
-                "  gmail 1 ls -ur -l 1",
-                "  gmail 1 ls -r",
-                "  gmail 1 ls -r -l 1",
-                "  gmail 1 ls -str",
-                "  gmail 1 ls -str -l 5",
-                "  gmail 1 ls -ext -l 10",
-                "  gmail 1 ls -snt -l 10",
-                "  gmail 1 ls -snt -c silvia -l 10",
-                "  gmail 1 ls -o -f xyz@example.com -l 1",
-                "  gmail 1 ls -o -ur -l 1",
-                "  # <preset> ls -ura|-ra <number_of_messages_to_audit>",
-                "  gmail 1 ls -ura -l 10",
-                "  gmail 1 ls -ra -l 10",
-                "  gmail 1 ls -t \"19ca756c06a7ebcd\"",
-                "",
-                "  open or change message state",
-                "  # <preset> o|mr|mra|mur|mstr|mustr|d|ms <message_or_thread_id>",
-                "  gmail 1 o \"19caef2cd6494116\"",
-                "  gmail 1 o -t \"19ca756c06a7ebcd\"",
-                "  gmail 1 mr \"19caef2cd6494116\"",
-                "  gmail 1 mra",
-                "  gmail 1 mur \"19caef2cd6494116\"",
-                "  gmail 1 mstr \"19caef2cd6494116\"",
-                "  gmail 1 mustr \"19caef2cd6494116\"",
-                "  gmail 1 d \"19caef2cd6494116\"",
-                "  gmail 1 ms \"19caef2cd6494116\"",
-                "",
-                "  reply to a message or thread, with optional reply-all and editor mode; the configured signature is appended automatically",
-                "  # <preset> r [-a] [-e] <message_id|thread_id> <body>|-dp <draft_path>",
-                "  gmail 1 r \"19caef2cd6494116\" \"Thanks for the update.\"",
-                "  gmail 1 r \"19caef2cd6494116\" -dp \"/tmp/reply.txt\"",
-                "  gmail 1 r -e \"19caef2cd6494116\"",
-                "  gmail 1 r -a \"19caef2cd6494116\" \"Thanks all.\"",
-                "  gmail 1 r \"19caef2cd6494116\" \"Adding context.\" -cc \"manager@example.com\"",
-                "  gmail 1 r \"19caef2cd6494116\" \"Please review.\" -atch \"/tmp/project_dir\"",
-                "  gmail 1 r -a \"19caef2cd6494116\" \"Please review.\" -atch \"/tmp/notes.txt\" \"/tmp/project_dir\"",
-                "  gmail 1 r -t \"19ca756c06a7ebcd\" \"Following up on this thread.\"",
-                "  gmail 1 r -t -a \"19ca756c06a7ebcd\" \"Thanks everyone.\"",
-                "",
-                "  clean spam, manage spam lists, and control the hourly timer",
-                "  # sc|ti|td|st and <preset> si|sc|sa|se",
-                "  gmail sc",
-                "  gmail 1 si",
-                "  gmail 1 sc",
-                "  gmail 1 sa \"spam1@example.com,spam2@example.com\"",
-                "  gmail 1 sa \"@domain1.com,@domain2.com\"",
-                "  gmail 1 se \"trusted1@example.com,trusted2@example.com\"",
-                "  gmail 1 se \"@trusted-domain.com\"",
-                "  gmail 1 sa -ur",
-                "  gmail ti",
-                "",
-                "  manage contact aliases",
-                "  # <preset> cn|-a <alias> <email>|-d <alias>|-e",
-                "  gmail 1 cn",
-                "  gmail 1 cn -a \"silvia\" \"xyz@hbc.com\"",
-                "  gmail 1 cn -d \"silvia\"",
-                "  gmail 1 cn -e",
-                ""
-            ]
-        )
-    print("\n".join(_comment_help_line(line) for line in lines))
+        return result.returncode
+    finally:
+        script_path.unlink(missing_ok=True)
 
 
 def _parse_recipient_csv(value: str, flag: str) -> list[str]:
@@ -1221,7 +897,7 @@ def _parse_reply_args(
             index += 1
             continue
         if len(token) > 2 and token.startswith("-") and set(token[1:]).issubset({"a", "t", "e"}):
-            raise UsageError("Do not combine reply flags. Use separate flags, e.g. r -t -a or r -a -t.")
+            raise UsageError("Use declarative reply options, for example: reply to thread <id> all body <body>.")
         if token in _TRAILING_OPTIONS:
             break
         raise UsageError(
@@ -1351,7 +1027,7 @@ def _handle_reply(
                 print(f"thread_id: {target_id}")
             else:
                 print(f"message_id: {target_id}")
-                print("hint: if this id is a thread id, use: r -e -t <thread_id>")
+                print("hint: if this id is a thread id, use: reply to thread <thread_id> in editor")
             print("body:")
             print(body)
         raise
@@ -1398,7 +1074,7 @@ def _handle_spam_identify(config, account, service) -> int:
     merged_spam = _merge_unique(account.spam_senders, decision.add_to_spam)
     update_account_sender_lists(config.path, {account.preset: merged_spam})
     print(f"updated: +{len(decision.add_to_spam)} spam")
-    print(f"si complete: spam_added={len(decision.add_to_spam)}")
+    print(f"spam inspect complete: spam_added={len(decision.add_to_spam)}")
     return 0
 
 
@@ -1417,7 +1093,7 @@ def _handle_spam_clean(account, service) -> int:
 
     result = run_cleanup_for_account(service, account, progress_callback=_progress)
     print(f"trashed_spam={result.trashed_spam}")
-    print(f"sc complete: trashed_spam={result.trashed_spam}")
+    print(f"spam clean complete: trashed_spam={result.trashed_spam}")
     return 0
 
 
@@ -1446,7 +1122,7 @@ def _run_spam_clean_all_presets() -> int:
         print(f"{preset}\ttrashed_spam={result.trashed_spam}")
     if not ran:
         raise UsageError("No configured presets found.")
-    print(f"sc_all complete: presets={len(config.accounts)} trashed_spam={total_trashed}")
+    print(f"spam clean complete: presets={len(config.accounts)} trashed_spam={total_trashed}")
     return 0
 
 
@@ -1492,7 +1168,7 @@ def _write_timer_units() -> None:
     service_path = systemd_dir / f"{_gmail_unit_name()}.service"
     timer_path = systemd_dir / f"{_gmail_unit_name()}.timer"
     entrypoint = Path(__file__).resolve()
-    run_command = _build_runtime_command("sc")
+    run_command = _build_runtime_command("spam", "clean")
     notify_command = _build_notification_command(
         "gmail",
         "Hourly spam clean finished successfully",
@@ -1562,10 +1238,10 @@ def _timer_status() -> int:
 
 def _handle_spam_add(config, account, service, params: list[str]) -> int:
     if len(params) != 1:
-        raise UsageError("sa requires exactly 1 param: <spam_email1,spam_email2,...> or -ur")
+        raise UsageError("spam add requires exactly one value: <email_or_domain_csv> or unread")
 
     if params[0] == "-ur":
-        print("sa -ur: scanning unread messages in batches...")
+        print("spam add unread: scanning unread messages in batches...")
         page_token: str | None = None
         sender_set: set[str] = set()
         message_ids: list[str] = []
@@ -1597,7 +1273,7 @@ def _handle_spam_add(config, account, service, params: list[str]) -> int:
             page_token = next_page
 
         if not message_ids:
-            print("sa -ur complete: no unread messages found")
+            print("spam add unread complete: no unread messages found")
             return 0
 
         candidate_senders = normalize_spam_sender_list(sorted(sender_set))
@@ -1605,29 +1281,29 @@ def _handle_spam_add(config, account, service, params: list[str]) -> int:
         update_account_sender_lists(config.path, {account.preset: merged})
         trashed = batch_delete_messages(service, message_ids)
         print(
-            f"sa -ur complete: added_senders={len(candidate_senders)} "
+            f"spam add unread complete: added_senders={len(candidate_senders)} "
             f"total_spam_senders={len(merged)} trashed_unread={trashed}"
         )
         return 0
 
     new_items = normalize_spam_sender_list([item.strip() for item in params[0].split(",")])
     if not new_items:
-        raise UsageError("sa requires at least one valid email in comma-separated input")
+        raise UsageError("spam add requires at least one valid email in comma-separated input")
     merged = _merge_unique(account.spam_senders, new_items)
     update_account_sender_lists(config.path, {account.preset: merged})
-    print(f"sa complete: added={len(new_items)} total_spam_senders={len(merged)}")
+    print(f"spam add complete: added={len(new_items)} total_spam_senders={len(merged)}")
     return 0
 
 
 def _handle_spam_exclude(config, account, params: list[str]) -> int:
     if len(params) != 1:
-        raise UsageError("se requires exactly 1 param: <email1,email2,...>")
+        raise UsageError("spam allow requires exactly 1 param: <email1,email2,...>")
     new_items = [item.strip().lower() for item in params[0].split(",") if item.strip()]
     if not new_items:
-        raise UsageError("se requires at least one valid email in comma-separated input")
+        raise UsageError("spam allow requires at least one valid email in comma-separated input")
     merged = sorted(set(account.spam_excludes + new_items))
     update_account_spam_excludes(config.path, account.preset, merged)
-    print(f"se complete: added={len(new_items)} total_spam_excludes={len(merged)}")
+    print(f"spam allow complete: added={len(new_items)} total_spam_excludes={len(merged)}")
     return 0
 
 
@@ -1789,20 +1465,20 @@ def _handle_contacts(config, account, params: list[str]) -> int:
     action = params[0]
     if action == "-e":
         if len(params) != 1:
-            raise UsageError("cn -e does not accept extra args")
+            raise UsageError("contacts edit does not accept extra args")
         return _open_config_in_editor(config.path)
 
     if action == "-a":
         if len(params) != 3:
-            raise UsageError("cn -a requires: <alias> <email>")
+            raise UsageError("contacts add requires: <alias> <email>")
         alias = params[1].strip().lower()
         email = params[2].strip()
         if not alias:
-            raise UsageError("cn -a requires non-empty alias")
+            raise UsageError("contacts add requires a non-empty alias")
         if "@" not in email:
             email = _resolve_contact(email, contacts)
         if "@" not in email:
-            raise UsageError("cn -a requires an email address")
+            raise UsageError("contacts add requires an email address")
         contacts[alias] = email
         update_account_contacts(config.path, account.preset, contacts)
         print(f"contact added: {alias} -> {email}")
@@ -1810,10 +1486,10 @@ def _handle_contacts(config, account, params: list[str]) -> int:
 
     if action == "-d":
         if len(params) != 2:
-            raise UsageError("cn -d requires: <alias>")
+            raise UsageError("contacts delete requires: <alias>")
         alias = params[1].strip().lower()
         if not alias:
-            raise UsageError("cn -d requires non-empty alias")
+            raise UsageError("contacts delete requires a non-empty alias")
         if alias not in contacts:
             print(f"contact not found: {alias}")
             return 0
@@ -1822,7 +1498,7 @@ def _handle_contacts(config, account, params: list[str]) -> int:
         print(f"contact deleted: {alias}")
         return 0
 
-    raise UsageError("cn supports: (no args), -a <alias> <email>, -d <alias>, -e")
+    raise UsageError("contacts supports: list, add <alias> <email>, delete <alias>, edit")
 
 
 def _read_signature(signature_file) -> str:
@@ -1874,54 +1550,262 @@ def _handle_auth(params: list[str]) -> int:
     return 0
 
 
+def _take_value(tokens: list[str], index: int, keyword: str, shape: str) -> tuple[str, int]:
+    if index >= len(tokens) or tokens[index] != keyword or index + 1 >= len(tokens):
+        raise UsageError(shape)
+    return tokens[index + 1], index + 2
+
+
+def _append_declarative_tail(out: list[str], tokens: list[str], index: int, shape: str) -> list[str]:
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {"cc", "bcc"}:
+            if index + 1 >= len(tokens):
+                raise UsageError(f"{token} requires: <emails>")
+            out.extend([f"-{token}", tokens[index + 1]])
+            index += 2
+            continue
+        if token == "attach":
+            index += 1
+            if index >= len(tokens):
+                raise UsageError("attach requires at least one path")
+            paths: list[str] = []
+            while index < len(tokens) and tokens[index] not in _DECLARATIVE_TRAILING_OPTIONS:
+                paths.append(tokens[index])
+                index += 1
+            if not paths:
+                raise UsageError("attach requires at least one path")
+            out.append("-atch")
+            out.extend(paths)
+            continue
+        raise UsageError(shape)
+    return out
+
+
+def _parse_send_declarative(params: list[str]) -> list[str]:
+    if params == ["in", "editor"]:
+        return ["-e"]
+    shape = (
+        "Use: gmail <preset> send to <email|alias> subject <subject> "
+        "body <body>|body from <draft_path> [cc <emails>] [bcc <emails>] [attach <path> ...]"
+    )
+    index = 0
+    to_email, index = _take_value(params, index, "to", shape)
+    subject, index = _take_value(params, index, "subject", shape)
+    if index >= len(params) or params[index] != "body" or index + 1 >= len(params):
+        raise UsageError(shape)
+    index += 1
+    out = [to_email, subject]
+    if params[index] == "from":
+        if index + 1 >= len(params):
+            raise UsageError("body from requires: <draft_path>")
+        out.extend(["-dp", params[index + 1]])
+        index += 2
+    else:
+        out.append(params[index])
+        index += 1
+    return _append_declarative_tail(out, params, index, shape)
+
+
+def _parse_reply_declarative(params: list[str]) -> list[str]:
+    shape = (
+        "Use: gmail <preset> reply to <message_id|thread <thread_id>> "
+        "[all] [in editor|body <body>|body from <draft_path>] "
+        "[cc <emails>] [bcc <emails>] [attach <path> ...]"
+    )
+    if len(params) < 2 or params[0] != "to":
+        raise UsageError(shape)
+    index = 1
+    out: list[str] = []
+    if params[index] == "thread":
+        if index + 1 >= len(params):
+            raise UsageError(shape)
+        out.append("-t")
+        target_id = params[index + 1]
+        index += 2
+    else:
+        target_id = params[index]
+        index += 1
+    if index < len(params) and params[index] == "all":
+        out.append("-a")
+        index += 1
+    if index + 1 < len(params) and params[index : index + 2] == ["in", "editor"]:
+        out.append("-e")
+        index += 2
+        out.append(target_id)
+        return _append_declarative_tail(out, params, index, shape)
+    if index >= len(params) or params[index] != "body" or index + 1 >= len(params):
+        raise UsageError(shape)
+    index += 1
+    out.append(target_id)
+    if params[index] == "from":
+        if index + 1 >= len(params):
+            raise UsageError("body from requires: <draft_path>")
+        out.extend(["-dp", params[index + 1]])
+        index += 2
+    else:
+        out.append(params[index])
+        index += 1
+    return _append_declarative_tail(out, params, index, shape)
+
+
+def _parse_list_declarative(params: list[str]) -> list[str]:
+    shape = (
+        "Use: gmail <preset> list [unread|read|sent|starred|external|thread <id>] "
+        "[from <sender>] [containing <text>] [since <window>] [limit <count>] "
+        "[with attachments] [open]"
+    )
+    out: list[str] = []
+    index = 0
+    mode = None
+    if index < len(params):
+        first = params[index]
+        if first in {"unread", "read", "sent", "starred", "external"}:
+            mode = first
+            index += 1
+        elif first == "thread":
+            if index + 1 >= len(params):
+                raise UsageError(shape)
+            out.extend(["-t", params[index + 1]])
+            index += 2
+        elif first in {"audit-unread", "audit-read"}:
+            mode = first
+            index += 1
+
+    if mode == "unread":
+        out.append("-ur")
+    elif mode == "read":
+        out.append("-r")
+    elif mode == "sent":
+        out.append("-snt")
+    elif mode == "starred":
+        out.append("-str")
+    elif mode == "external":
+        out.append("-ext")
+    elif mode == "audit-unread":
+        out.append("-ura")
+    elif mode == "audit-read":
+        out.append("-ra")
+
+    while index < len(params):
+        token = params[index]
+        if token == "from":
+            if index + 1 >= len(params):
+                raise UsageError("from requires: <sender>")
+            out.extend(["-f", params[index + 1]])
+            index += 2
+            continue
+        if token == "containing":
+            if index + 1 >= len(params):
+                raise UsageError("containing requires: <text>")
+            out.extend(["-c", params[index + 1]])
+            index += 2
+            continue
+        if token == "since":
+            if index + 1 >= len(params):
+                raise UsageError("since requires: <window>")
+            out.extend(["-tl", params[index + 1]])
+            index += 2
+            continue
+        if token == "limit":
+            if index + 1 >= len(params):
+                raise UsageError("limit requires: <count>")
+            out.extend(["-l", params[index + 1]])
+            index += 2
+            continue
+        if token == "with" and index + 1 < len(params) and params[index + 1] == "attachments":
+            out.append("-wa")
+            index += 2
+            continue
+        if token == "open":
+            out.append("-o")
+            index += 1
+            continue
+        raise UsageError(shape)
+    return out
+
+
+def _parse_contacts_declarative(params: list[str]) -> list[str]:
+    if not params or params == ["list"]:
+        return []
+    action = params[0]
+    if action == "add" and len(params) == 3:
+        return ["-a", params[1], params[2]]
+    if action == "delete" and len(params) == 2:
+        return ["-d", params[1]]
+    if action == "edit" and len(params) == 1:
+        return ["-e"]
+    raise UsageError("Use: gmail <preset> contacts list|add <alias> <email>|delete <alias>|edit")
+
+
+def _is_legacy_gmail_command(command: str) -> bool:
+    return command in {
+        "s",
+        "-s",
+        "ls",
+        "r",
+        "o",
+        "si",
+        "sc",
+        "sa",
+        "se",
+        "mr",
+        "mra",
+        "mur",
+        "mstr",
+        "mustr",
+        "d",
+        "ms",
+        "cn",
+    }
+
+
 def _dispatch(argv: list[str]) -> int:
-    if not argv:
-        _print_usage_guide(show_examples=True, show_usage=True)
-        return 0
     first = argv[0].lower()
     if first == "auth":
         return _handle_auth(argv[1:])
-    if first in GLOBAL_COMMANDS:
+    if first == "config":
         if len(argv) != 1:
-            raise UsageError(f"Use: gmail {first}")
-        if first == "conf":
-            return _open_config_in_editor()
-        if first == "sc":
-            return _run_spam_clean_all_presets()
-        if first == "ti":
+            raise UsageError("Use: gmail config")
+        return _open_config_in_editor()
+    if first == "spam":
+        if argv[1:] != ["clean"]:
+            raise UsageError("Use: gmail spam clean")
+        return _run_spam_clean_all_presets()
+    if first == "timer":
+        if len(argv) != 2 or argv[1] not in {"install", "disable", "status"}:
+            raise UsageError("Use: gmail timer install|disable|status")
+        if argv[1] == "install":
             return _install_timer()
-        if first == "td":
+        if argv[1] == "disable":
             return _disable_timer()
         return _timer_status()
-    preset_required_commands = {"s", "-s", "ls", "r", "o", "si", "sc", "sa", "se", "mr", "mra", "mur", "mstr", "mustr", "d", "ms", "cn"}
-    if first in preset_required_commands:
-        hint = " ".join(argv)
-        raise UsageError(
-            f"Missing preset before command '{argv[0]}'. Example: gmail <preset> {hint}"
-        )
-
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
-    if not args.preset or not args.command:
-        raise UsageError("Expected: <preset> <command>. Use -h for usage.")
+    if first in {"conf", "sc", "ti", "td", "st"}:
+        raise UsageError("Use declarative commands: gmail config, gmail spam clean, or gmail timer install|disable|status")
+    if not first.isdigit():
+        raise UsageError("Expected: gmail <preset> <command>. Use gmail -h for examples.")
+    if len(argv) < 2:
+        raise UsageError("Expected: gmail <preset> <command>. Use gmail -h for examples.")
 
     config = load_config()
-    account = get_account(config, args.preset)
+    account = get_account(config, first)
 
-    command = args.command.lower()
-    if command == "cn":
-        return _handle_contacts(config, account, args.params)
+    command = argv[1].lower()
+    params = argv[2:]
+    if _is_legacy_gmail_command(command):
+        raise UsageError("Use declarative commands. Run: gmail -h")
+    if command == "contacts":
+        return _handle_contacts(config, account, _parse_contacts_declarative(params))
 
     service = build_gmail_service(account)
-    if command in {"s", "-s"}:
+    if command == "send":
         signature = _read_signature(account.signature_file)
-        return _handle_send(service, account.email, args.params, signature, account.contacts)
+        return _handle_send(service, account.email, _parse_send_declarative(params), signature, account.contacts)
 
-    if command == "ls":
+    if command == "list":
         return _handle_list(
             service,
-            args.params,
+            _parse_list_declarative(params),
             config.default_list_limit,
             account.email,
             utc_offset=config.timezone_offset,
@@ -1929,78 +1813,91 @@ def _dispatch(argv: list[str]) -> int:
             account=account,
         )
 
-    if command == "r":
+    if command == "reply":
         signature = _read_signature(account.signature_file)
-        return _handle_reply(service, account.email, args.params, signature, account.contacts)
+        return _handle_reply(service, account.email, _parse_reply_declarative(params), signature, account.contacts)
 
-    if command == "o":
+    if command == "open":
+        if len(params) != 2 or params[0] not in {"message", "thread"}:
+            raise UsageError("Use: gmail <preset> open message <id> | open thread <id>")
+        open_params = [params[1]] if params[0] == "message" else ["-t", params[1]]
         return _handle_open_message(
-            service, args.params, account.email, account.preset, utc_offset=config.timezone_offset
+            service, open_params, account.email, account.preset, utc_offset=config.timezone_offset
         )
 
-    if command == "mr":
-        return _handle_mark_read(service, args.params)
+    if command == "mark":
+        if len(params) == 3 and params[0] == "message":
+            message_id, state = params[1], params[2]
+            if state == "read":
+                return _handle_mark_read(service, [message_id])
+            if state == "unread":
+                return _handle_mark_unread(service, [message_id])
+            if state == "starred":
+                return _handle_mark_star(service, [message_id])
+            if state == "unstarred":
+                return _handle_mark_unstar(service, [message_id])
+        if params == ["all", "unread", "read"]:
+            return _handle_mark_read_all(service, [])
+        raise UsageError("Use: gmail <preset> mark message <id> read|unread|starred|unstarred")
 
-    if command == "mra":
-        return _handle_mark_read_all(service, args.params)
+    if command == "delete":
+        if len(params) != 2 or params[0] != "message":
+            raise UsageError("Use: gmail <preset> delete message <id>")
+        return _handle_delete(service, [params[1]])
 
-    if command == "mur":
-        return _handle_mark_unread(service, args.params)
+    if command == "spam":
+        if not params:
+            raise UsageError("Use: gmail <preset> spam inspect|clean|add|allow")
+        action = params[0]
+        rest = params[1:]
+        if action == "inspect":
+            if rest:
+                raise UsageError("Use: gmail <preset> spam inspect")
+            return _handle_spam_identify(config, account, service)
+        if action == "clean":
+            if rest:
+                raise UsageError("Use: gmail <preset> spam clean")
+            return _handle_spam_clean(account, service)
+        if action == "add":
+            if rest == ["unread"]:
+                return _handle_spam_add(config, account, service, ["-ur"])
+            if len(rest) != 1:
+                raise UsageError("Use: gmail <preset> spam add <email_or_domain_csv>|unread")
+            return _handle_spam_add(config, account, service, rest)
+        if action == "allow":
+            if len(rest) != 1:
+                raise UsageError("Use: gmail <preset> spam allow <email_or_domain_csv>")
+            return _handle_spam_exclude(config, account, rest)
+        if action == "mark" and len(rest) == 2 and rest[0] == "message":
+            return _handle_mark_spammer(config, account, service, [rest[1]])
+        raise UsageError("Use: gmail <preset> spam inspect|clean|add|allow")
 
-    if command == "mstr":
-        return _handle_mark_star(service, args.params)
-
-    if command == "mustr":
-        return _handle_mark_unstar(service, args.params)
-
-    if command == "d":
-        return _handle_delete(service, args.params)
-
-    if command == "ms":
-        return _handle_mark_spammer(config, account, service, args.params)
-
-    if command == "si":
-        if args.params:
-            raise UsageError("si does not accept extra args. Use: gmail <preset> si")
+    if command == "inspect-spam":
+        if params:
+            raise UsageError("Use: gmail <preset> spam inspect")
         return _handle_spam_identify(config, account, service)
 
-    if command == "sc":
-        if args.params:
-            raise UsageError("sc does not accept extra args. Use: gmail <preset> sc")
-        return _handle_spam_clean(account, service)
-
-    if command == "sa":
-        return _handle_spam_add(config, account, service, args.params)
-
-    if command == "se":
-        return _handle_spam_exclude(config, account, args.params)
-
-    if command == "cn":
-        return _handle_contacts(config, account, args.params)
-
     raise UsageError(
-        f"Unknown command '{args.command}'. Use s, ls, r, o, mr, mra, mur, mstr, mustr, d, ms, si, sc, sa, se, or cn."
+        "Unknown command. Use: send, list, open, reply, mark, delete, spam, or contacts."
     )
-
-
-APP_SPEC = AppSpec(
-    app_name="gmail",
-    version=__version__,
-    help_text=HELP_TEXT,
-    install_script_path=INSTALL_SCRIPT,
-    no_args_mode="help",
-    config_path_factory=resolve_config_path,
-    config_bootstrap_text='{\n  "defaults": {\n    "list_limit": 10,\n    "timezone_offset": "+05:30"\n  },\n  "accounts": {}\n}\n',
-)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if args[:1] == ["-h"] and len(args) > 1:
-        if len(args) != 2:
-            raise UsageError("Use: gmail -h or gmail -h <topic>")
-        return _print_help_topic(args[1])
-    return run_app(APP_SPEC, args, _dispatch)
+    if not args:
+        _print_help()
+        return 0
+    if args == ["-h"]:
+        _print_help()
+        return 0
+    if args == ["-v"]:
+        print(__version__)
+        return 0
+    if args == ["-u"]:
+        return _upgrade_app()
+    if args[0] in {"-h", "-v", "-u"}:
+        raise UsageError(f"Use: gmail {args[0]}")
+    return _dispatch(args)
 
 
 if __name__ == "__main__":

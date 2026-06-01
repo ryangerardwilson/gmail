@@ -1,8 +1,8 @@
 # AGENTS.md
 
 ## Workspace Defaults
-- Follow `/home/ryan/Documents/agent_context/CLI_TUI_STYLE_GUIDE.md` for CLI/TUI taste and help shape.
-- Follow `/home/ryan/Documents/agent_context/CANONICAL_REFERENCE_IMPLEMENTATION_FOR_CLI_AND_TUI_APPS.md` for executable contract details such as `-h`, `-v`, `-u`, installer behavior, release workflow expectations, and regression expectations.
+- Follow `/home/ryan/Subagents/cpo/CLI_TUI_STYLE_GUIDE.md` for CLI/TUI taste and help shape.
+- Follow `/home/ryan/Subagents/cto/CANONICAL_REFERENCE_IMPLEMENTATION_FOR_CLI_AND_TUI_APPS.md` for executable contract details such as `-h`, `-v`, `-u`, installer behavior, release workflow expectations, and regression expectations.
 - This file only records `gmail`-specific constraints or durable deviations.
 
 ## Mission
@@ -27,24 +27,24 @@ using account presets defined in XDG-compliant config.
   - CLI must automatically create the data/token directories if missing.
   - do not keep legacy preset-token fallback logic in the main runtime.
 - `signature_file` must remain a per-account config setting, and send/reply flows must append that configured signature automatically.
-- CLI interface must support:
-  - `python main.py <preset> s <to> <subject> <body>`
-  - `python main.py <preset> ls [-l <limit>] [-wa] [-f <from>] [-c <contains>] [-tl <time_limit>]`
-  - `python main.py <preset> r <message_id> <body>`
-- Spam cleanup should support both:
-  - `python main.py <preset> sc`
-  - `python main.py sc`
+- CLI interface must support declarative commands such as:
+  - `python main.py <preset> send to <email|alias> subject <subject> body <body>`
+  - `python main.py <preset> list [unread|read|sent|starred|external] [from <sender>] [containing <text>] [since <window>] [limit <count>]`
+  - `python main.py <preset> reply to <message_id|thread <thread_id>> [all] body <body>`
+- Spam cleanup should support:
+  - `python main.py <preset> spam clean`
+  - `python main.py spam clean`
 - Timer controls should be global:
-  - `python main.py ti`
-  - `python main.py td`
-  - `python main.py st`
+  - `python main.py timer install`
+  - `python main.py timer disable`
+  - `python main.py timer status`
 - List examples to support:
-  - `python main.py 1 ls -l 10`
-  - `python main.py 1 ls -wa -l 10`
-  - `python main.py 1 ls -f maanas -l 1`
-  - `python main.py 1 ls -c invoice -l 10`
-  - `python main.py 1 ls -f geeta -tl 2w -l 10`
-  - `python main.py 1 ls -tl "jan 2025" -l 20`
+  - `python main.py 1 list limit 10`
+  - `python main.py 1 list with attachments limit 10`
+  - `python main.py 1 list from maanas limit 1`
+  - `python main.py 1 list containing invoice limit 10`
+  - `python main.py 1 list from geeta since 2w limit 10`
+  - `python main.py 1 list since "jan 2025" limit 20`
 
 ## Architecture expectations
 - Keep API boundaries clean:
@@ -87,17 +87,17 @@ Adjust structure if needed, but preserve separation of concerns.
   - proper `Re:` subject handling.
 
 ## Search/query behavior
-- Parse `ls` args into:
-  - optional `-l <limit>`
-  - `-wa` downloadable-attachment filter
-  - `-f <from>` sender filter
-  - `-c <contains>` Gmail full-text term filter
-  - `-tl <time_limit>` time filter
+- Parse `list` args into:
+  - optional `limit <count>`
+  - `with attachments` downloadable-attachment filter
+  - `from <sender>` sender filter
+  - `containing <text>` Gmail full-text term filter
+  - `since <window>` time filter
   - Gmail `q` expression plus `maxResults`
-- Unknown `ls` tokens should fail fast with a short shape error.
+- Unknown `list` tokens should fail fast with a short shape error.
 
 ## Output contract
-- `ls` must print rows including:
+- `list` must print rows including:
   - local index/id
   - `message_id`
   - `thread_id`
@@ -126,9 +126,10 @@ Adjust structure if needed, but preserve separation of concerns.
 ## Definition of done
 - CLI supports send/list/reply for configured Gmail presets.
 - Works with at least two configured accounts.
-- Global `sc` runs spam cleanup across all configured presets.
-- `ti` installs one hourly user timer that runs the same global spam cleanup command and sends a success notification through the Quickshell bar, with `notify-send` only as a fallback.
+- Global `spam clean` runs spam cleanup across all configured presets.
+- `timer install` installs one hourly user timer that runs the same global spam cleanup command and sends a success notification through the Quickshell bar, with `notify-send` only as a fallback.
 - Config path resolution is XDG-compliant.
-- `ls -l 10`, `ls -wa -l 10`, `ls -f maanas -l 1`, `ls -c invoice -l 10`, `ls -f geeta -tl 2w -l 10`, and `ls -tl "jan 2025" -l 20` work.
+- `list limit 10`, `list with attachments limit 10`, `list from maanas limit 1`, `list containing invoice limit 10`, `list from geeta since 2w limit 10`, and `list since "jan 2025" limit 20` work.
 - Tests for core parsing/config logic pass locally.
 - README is sufficient for a new user to run first auth and send an email.
+- Do not reintroduce the retired shared CLI contract package, its TOML file, or old compressed commands.

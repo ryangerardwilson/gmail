@@ -21,12 +21,19 @@ gmail upgrade
 
 gmail auth ~/Documents/credentials/client_secret.json
 gmail config
+gmail accounts list
+gmail setup check
 gmail 1 send in editor
+gmail 1 preview send to person@example.com subject "Hello" body "Body"
 gmail 1 send to person@example.com subject "Hello" body "Body"
 gmail 1 list unread from geeta since 2w limit 10
+gmail 1 list unread from geeta since 2w limit 10 output json
 gmail 1 list sent containing proposal since 14d limit 10
 gmail 1 list with attachments from geeta limit 10
+gmail 1 inspect message 19caef2cd6494116
+gmail 1 inspect thread 19ca756c06a7ebcd
 gmail 1 open message 19caef2cd6494116
+gmail 1 preview reply to 19caef2cd6494116 body "Thanks for the update."
 gmail 1 reply to 19caef2cd6494116 body "Thanks for the update."
 gmail 1 reply to thread 19ca756c06a7ebcd all body "Thanks everyone."
 gmail spam clean
@@ -65,6 +72,9 @@ gmail 1 contacts edit
 ```
 
 Send and reply flows append the configured `signature_file` automatically.
+Use `inspect` instead of `open` when you need to read without marking messages
+read or downloading attachments. Use `preview` before sends or replies when an
+agent should validate intent without sending.
 
 ## Timer
 

@@ -1,8 +1,8 @@
 # AGENTS.md
 
 ## Workspace Defaults
-- Follow `/home/ryan/Subagents/cpo/CLI_TUI_STYLE_GUIDE.md` for CLI/TUI taste and help shape.
-- Follow `/home/ryan/Subagents/cto/CANONICAL_REFERENCE_IMPLEMENTATION_FOR_CLI_AND_TUI_APPS.md` for executable contract details such as `help`, `version`, `upgrade`, installer behavior, release workflow expectations, and regression expectations.
+- Follow `/home/ryan/Generalists/ceo/PRODUCT_PURITY.md` for declarative CLI purity.
+- Follow `/home/ryan/Generalists/cto/CANONICAL_REFERENCE_IMPLEMENTATION_FOR_CLI_AND_TUI_APPS.md` for executable contract details such as `help`, `version`, `upgrade`, installer behavior, release workflow expectations, and regression expectations.
 - This file only records `gmail`-specific constraints or durable deviations.
 
 ## Mission
@@ -28,9 +28,16 @@ using account presets defined in XDG-compliant config.
   - do not keep legacy preset-token fallback logic in the main runtime.
 - `signature_file` must remain a per-account config setting, and send/reply flows must append that configured signature automatically.
 - CLI interface must support declarative commands such as:
+  - `python main.py accounts list`
+  - `python main.py setup check`
   - `python main.py <preset> send to <email|alias> subject <subject> body <body>`
+  - `python main.py <preset> preview send to <email|alias> subject <subject> body <body>`
   - `python main.py <preset> list [unread|read|sent|starred|external] [from <sender>] [containing <text>] [since <window>] [limit <count>]`
+  - `python main.py <preset> list ... output json`
+  - `python main.py <preset> inspect message <message_id>`
+  - `python main.py <preset> inspect thread <thread_id>`
   - `python main.py <preset> reply to <message_id|thread <thread_id>> [all] body <body>`
+  - `python main.py <preset> preview reply to <message_id|thread <thread_id>> [all] body <body>`
 - Spam cleanup should support:
   - `python main.py <preset> spam clean`
   - `python main.py spam clean`
@@ -71,6 +78,9 @@ Adjust structure if needed, but preserve separation of concerns.
 - Use Python 3.11+ style where available.
 - Use `argparse` or equivalent explicit parsing (no implicit positional magic).
 - Produce deterministic terminal output for machine + human readability.
+- Agent-safe commands must be side-effect explicit: `inspect` does not mark
+  read or download attachments; `open` may mark read and download attachments;
+  `preview` validates sends/replies without sending.
 - Return non-zero exit codes for errors with concise actionable messages.
 - Never print OAuth tokens or secrets.
 - Create token directories/files with restrictive permissions (`0700` dirs where possible).

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from email.utils import parseaddr
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ from gmail_cli.config import (
     load_config,
     normalize_spam_sender_list,
     resolve_config_path,
+    token_file_for_email,
     upsert_authenticated_account,
     update_account_contacts,
     update_account_spam_excludes,
@@ -78,22 +80,31 @@ features:
   # config
   gmail config
 
+  list configured accounts and run a redacted setup check for agents
+  # accounts list | setup check
+  gmail accounts list
+  gmail setup check
+
   send a new email, with optional editor mode, cc, bcc, and attachments
   # <preset> send to <email|alias> subject <subject> body <body> [cc <emails>] [bcc <emails>] [attach <path> ...]
   gmail 1 send in editor
   gmail 1 send to person@example.com subject "Hello" body "Body"
   gmail 1 send to boss subject "Notes" body "Draft is attached" attach ~/notes.txt
+  gmail 1 preview send to boss subject "Notes" body "Draft is attached" attach ~/notes.txt
 
   list and search messages using explicit filters
-  # <preset> list [unread|read|sent|starred|external] [from <sender>] [containing <text>] [since <window>] [limit <count>] [with attachments] [open]
+  # <preset> list [unread|read|sent|starred|external] [from <sender>] [containing <text>] [since <window>] [limit <count>] [with attachments] [open] [output json]
   gmail 1 list unread from geeta since 2w limit 10
   gmail 1 list sent containing proposal since 14d limit 10
   gmail 1 list with attachments from geeta limit 10
+  gmail 1 list unread from geeta limit 10 output json
 
   open messages and reply to messages or threads
-  # <preset> open message <id> | <preset> open thread <id>
+  # <preset> inspect message <id> | inspect thread <id> | open message <id> | open thread <id>
+  gmail 1 inspect message 19caef2cd6494116
   gmail 1 open message 19caef2cd6494116
   # <preset> reply to <message_id> [all] [in editor|body <body>]
+  gmail 1 preview reply to 19caef2cd6494116 body "Thanks for the update."
   gmail 1 reply to 19caef2cd6494116 body "Thanks for the update."
   gmail 1 reply to thread 19ca756c06a7ebcd all body "Thanks everyone."
 
@@ -110,6 +121,10 @@ features:
   gmail 1 contacts list
   gmail 1 contacts add boss boss@example.com
   gmail 1 contacts edit
+
+agent-safe workflow:
+  list accounts first, inspect before open when read-state matters, preview
+  before send or reply, and use output json when another agent will parse rows
 """
 
 
@@ -121,6 +136,108 @@ def _muted(text: str) -> str:
 
 def _print_help() -> None:
     print(_muted(HELP_TEXT.rstrip()))
+
+
+def _print_json(value) -> None:
+    print(json.dumps(value, indent=2, sort_keys=True))
+
+
+def _token_status_for_email(email: str) -> str:
+    return "present" if token_file_for_email(email).exists() else "missing"
+
+
+def _account_rows(config) -> list[dict[str, str | int]]:
+    rows: list[dict[str, str | int]] = []
+    for preset, account in sorted(config.accounts.items(), key=lambda item: int(item[0]) if item[0].isdigit() else 9999):
+        rows.append(
+            {
+                "preset": preset,
+                "email": account.email,
+                "token": _token_status_for_email(account.email),
+                "signature": "present" if account.signature_file.exists() else "missing",
+                "contacts": len(account.contacts),
+                "spam_senders": len(account.spam_senders),
+                "spam_excludes": len(account.spam_excludes),
+            }
+        )
+    return rows
+
+
+def _handle_accounts_list(params: list[str]) -> int:
+    output_json = _parse_optional_output_json(params, "Use: gmail accounts list [output json]")
+    config = load_config()
+    rows = _account_rows(config)
+    if output_json:
+        _print_json({"accounts": rows})
+        return 0
+    if not rows:
+        print("No Gmail accounts configured.")
+        return 0
+    for row in rows:
+        print(
+            "account "
+            f"preset={row['preset']} "
+            f"email={row['email']} "
+            f"token={row['token']} "
+            f"signature={row['signature']} "
+            f"contacts={row['contacts']}"
+        )
+    return 0
+
+
+def _handle_setup_check(params: list[str]) -> int:
+    output_json = _parse_optional_output_json(params, "Use: gmail setup check [output json]")
+    config = load_config()
+    rows = _account_rows(config)
+    payload = {
+        "config": str(config.path),
+        "accounts": rows,
+        "defaults": {
+            "list_limit": config.default_list_limit,
+            "timezone_offset": config.timezone_offset,
+        },
+        "timer": _timer_state_summary(),
+    }
+    if output_json:
+        _print_json(payload)
+        return 0
+    print(f"config={payload['config']}")
+    print(f"default_list_limit={config.default_list_limit}")
+    print(f"timezone_offset={config.timezone_offset}")
+    print(f"timer={payload['timer']}")
+    for row in rows:
+        print(
+            "account "
+            f"preset={row['preset']} "
+            f"email={row['email']} "
+            f"token={row['token']} "
+            f"signature={row['signature']}"
+        )
+    return 0
+
+
+def _timer_state_summary() -> str:
+    try:
+        result = _systemctl_user("is-active", "gmail.timer", check=False)
+    except Exception:
+        return "unknown"
+    return (result.stdout or result.stderr or "unknown").strip() or "unknown"
+
+
+def _parse_optional_output_json(params: list[str], shape: str) -> bool:
+    if not params:
+        return False
+    if params == ["output", "json"]:
+        return True
+    raise UsageError(shape)
+
+
+def _extract_output_json(params: list[str], shape: str) -> tuple[list[str], bool]:
+    if len(params) >= 2 and params[-2:] == ["output", "json"]:
+        return params[:-2], True
+    if "output" in params:
+        raise UsageError(shape)
+    return params, False
 
 
 def _upgrade_app() -> int:
@@ -572,7 +689,13 @@ def _audit_message_batch(
     return audited, trashed, stopped
 
 
-def _extract_list_flags(params: list[str]) -> tuple[bool, bool, list[str]]:
+def _extract_list_flags(params: list[str]) -> tuple[bool, bool, bool, list[str]]:
+    params, output_json = _extract_output_json(
+        params,
+        "Use: gmail <preset> list [unread|read|sent|starred|external|thread <id>] "
+        "[from <sender>] [containing <text>] [since <window>] [limit <count>] "
+        "[with attachments] [open] [output json]",
+    )
     open_mode = False
     attachments_only = False
     filtered: list[str] = []
@@ -584,7 +707,7 @@ def _extract_list_flags(params: list[str]) -> tuple[bool, bool, list[str]]:
             attachments_only = True
             continue
         filtered.append(token)
-    return open_mode, attachments_only, filtered
+    return open_mode, attachments_only, output_json, filtered
 
 
 def _print_list_results(
@@ -593,7 +716,18 @@ def _print_list_results(
     my_email: str,
     utc_offset: str,
     open_mode: bool,
+    output_json: bool = False,
 ) -> None:
+    if output_json:
+        _print_json(
+            {
+                "messages": [
+                    summarize_message(message, utc_offset=utc_offset)
+                    for message in messages
+                ]
+            }
+        )
+        return
     if not open_mode:
         print(render_messages_table(messages, my_email, utc_offset=utc_offset))
         return
@@ -646,7 +780,9 @@ def _handle_list(
     config_path=None,
     account=None,
 ) -> int:
-    open_mode, attachments_only, filtered_params = _extract_list_flags(params)
+    open_mode, attachments_only, output_json, filtered_params = _extract_list_flags(params)
+    if open_mode and output_json:
+        raise UsageError("Use either open or output json, not both")
     if not filtered_params:
         if attachments_only:
             messages = _list_matching_messages(
@@ -656,7 +792,7 @@ def _handle_list(
                 attachments_only=True,
             )
             messages = _sort_messages_oldest_first(messages)
-            _print_list_results(service, messages, my_email, utc_offset, open_mode)
+            _print_list_results(service, messages, my_email, utc_offset, open_mode, output_json)
             return 0
         raise UsageError(
             "ls requires -l <limit>, -wa, -f <from>, -c <contains>, -tl <time_limit>, or a mode flag like -ur"
@@ -675,7 +811,7 @@ def _handle_list(
             attachments_only=attachments_only,
         )
         messages = _sort_messages_oldest_first(messages)
-        _print_list_results(service, messages, my_email, utc_offset, open_mode)
+        _print_list_results(service, messages, my_email, utc_offset, open_mode, output_json)
         return 0
 
     if filtered_params[0] == "-r":
@@ -687,7 +823,7 @@ def _handle_list(
             attachments_only=attachments_only,
         )
         messages = _sort_messages_oldest_first(messages)
-        _print_list_results(service, messages, my_email, utc_offset, open_mode)
+        _print_list_results(service, messages, my_email, utc_offset, open_mode, output_json)
         return 0
 
     if filtered_params[0] == "-str":
@@ -699,7 +835,7 @@ def _handle_list(
             attachments_only=attachments_only,
         )
         messages = _sort_messages_oldest_first(messages)
-        _print_list_results(service, messages, my_email, utc_offset, open_mode)
+        _print_list_results(service, messages, my_email, utc_offset, open_mode, output_json)
         return 0
 
     if filtered_params[0] == "-ext":
@@ -715,7 +851,7 @@ def _handle_list(
             attachments_only=attachments_only,
         )
         messages = _sort_messages_oldest_first(messages)
-        _print_list_results(service, messages, my_email, utc_offset, open_mode)
+        _print_list_results(service, messages, my_email, utc_offset, open_mode, output_json)
         return 0
 
     if filtered_params[0] == "-snt":
@@ -728,7 +864,7 @@ def _handle_list(
                 attachments_only=attachments_only,
             )
             messages = _sort_messages_oldest_first(messages)
-            _print_list_results(service, messages, my_email, utc_offset, open_mode)
+            _print_list_results(service, messages, my_email, utc_offset, open_mode, output_json)
             return 0
 
         parsed = parse_list_query_args(
@@ -744,7 +880,7 @@ def _handle_list(
             attachments_only=attachments_only,
         )
         messages = _sort_messages_oldest_first(messages)
-        _print_list_results(service, messages, my_email, utc_offset, open_mode)
+        _print_list_results(service, messages, my_email, utc_offset, open_mode, output_json)
         return 0
 
     if filtered_params[0] == "-ura":
@@ -785,7 +921,7 @@ def _handle_list(
         if attachments_only:
             messages = _filter_messages_with_attachments(messages)
         messages = _sort_messages_oldest_first(messages)
-        _print_list_results(service, messages, my_email, utc_offset, open_mode)
+        _print_list_results(service, messages, my_email, utc_offset, open_mode, output_json)
         return 0
 
     parsed = parse_list_query_args(filtered_params, default_limit, base_terms=["-in:sent"])
@@ -796,7 +932,7 @@ def _handle_list(
         attachments_only=attachments_only,
     )
     messages = _sort_messages_oldest_first(messages)
-    _print_list_results(service, messages, my_email, utc_offset, open_mode)
+    _print_list_results(service, messages, my_email, utc_offset, open_mode, output_json)
     return 0
 
 
@@ -1033,6 +1169,58 @@ def _handle_reply(
         raise
     print(f"replied message_id={response.get('id')} thread_id={response.get('threadId')}")
     return 0
+
+
+def _path_names(paths: list[Path]) -> str:
+    return ",".join(str(path) for path in paths) if paths else "-"
+
+
+def _handle_preview(from_email: str, params: list[str], contacts: dict[str, str]) -> int:
+    if not params:
+        raise UsageError("Use: gmail <preset> preview send ... | preview reply ...")
+    action = params[0]
+    rest = params[1:]
+    if action == "send":
+        internal = _parse_send_declarative(rest)
+        if internal == ["-e"]:
+            print(f"preview_send from={from_email} mode=editor side_effects=none")
+            return 0
+        to_email, subject, body, cc_emails, bcc_emails, attachment_paths = _parse_send_args(internal)
+        to_email = _resolve_contact(to_email, contacts)
+        cc_emails = _resolve_recipient_list(cc_emails, contacts)
+        bcc_emails = _resolve_recipient_list(bcc_emails, contacts)
+        print(
+            "preview_send "
+            f"from={from_email} "
+            f"to={to_email} "
+            f"subject={subject!r} "
+            f"cc={','.join(cc_emails) if cc_emails else '-'} "
+            f"bcc={','.join(bcc_emails) if bcc_emails else '-'} "
+            f"attachments={_path_names(attachment_paths)} "
+            f"body_chars={len(body)} "
+            "signature=automatic side_effects=none"
+        )
+        return 0
+    if action == "reply":
+        internal = _parse_reply_declarative(rest)
+        use_thread, reply_all, use_editor, target_id, body, cc_emails, bcc_emails, attachment_paths = _parse_reply_args(internal)
+        cc_emails = _resolve_recipient_list(cc_emails, contacts)
+        bcc_emails = _resolve_recipient_list(bcc_emails, contacts)
+        target_label = "thread_id" if use_thread else "message_id"
+        print(
+            "preview_reply "
+            f"from={from_email} "
+            f"{target_label}={target_id} "
+            f"reply_all={'yes' if reply_all else 'no'} "
+            f"mode={'editor' if use_editor else 'body'} "
+            f"cc={','.join(cc_emails) if cc_emails else '-'} "
+            f"bcc={','.join(bcc_emails) if bcc_emails else '-'} "
+            f"attachments={_path_names(attachment_paths)} "
+            f"body_chars={len(body)} "
+            "signature=automatic side_effects=none"
+        )
+        return 0
+    raise UsageError("Use: gmail <preset> preview send ... | preview reply ...")
 
 
 def _merge_unique(existing: list[str], incoming: list[str]) -> list[str]:
@@ -1397,6 +1585,51 @@ def _handle_open_message(
     return 0
 
 
+def _handle_inspect_message(service, params: list[str], my_email: str, utc_offset: str = "+05:30") -> int:
+    shape = "Use: gmail <preset> inspect message <id> | inspect thread <id> [output json]"
+    params, output_json = _extract_output_json(params, shape)
+    if len(params) != 2 or params[0] not in {"message", "thread"}:
+        raise UsageError(shape)
+    target_kind, target_id = params
+    if target_kind == "message":
+        message = get_message(service, target_id, format_type="full")
+        message = hydrate_message_text_bodies(service, message)
+        message = hydrate_message_text_from_raw(service, message)
+        if output_json:
+            _print_json({"message": summarize_message(message, trim_body=False, utc_offset=utc_offset)})
+        else:
+            print(render_message_open(message, my_email, utc_offset=utc_offset))
+            print(f"inspected message_id={target_id} side_effects=none")
+        return 0
+
+    messages = get_thread_messages(service, target_id)
+    messages = [
+        hydrate_message_text_from_raw(service, hydrate_message_text_bodies(service, message))
+        for message in _sort_messages_oldest_first(messages)
+    ]
+    if output_json:
+        _print_json(
+            {
+                "thread_id": target_id,
+                "messages": [
+                    summarize_message(message, trim_body=False, utc_offset=utc_offset)
+                    for message in messages
+                ],
+            }
+        )
+        return 0
+    if not messages:
+        print(f"no messages found in thread_id={target_id}")
+        return 0
+    for idx, message in enumerate(messages, start=1):
+        print(f"[{idx}/{len(messages)}]")
+        print(render_message_open(message, my_email, utc_offset=utc_offset))
+        if idx < len(messages):
+            print("")
+    print(f"inspected_thread thread_id={target_id} messages={len(messages)} side_effects=none")
+    return 0
+
+
 def _handle_mark_unread(service, params: list[str]) -> int:
     if len(params) != 1:
         raise UsageError("mur requires exactly 1 param: <message_id>")
@@ -1721,6 +1954,10 @@ def _parse_list_declarative(params: list[str]) -> list[str]:
             out.append("-o")
             index += 1
             continue
+        if token == "output" and index + 1 < len(params) and params[index + 1] == "json":
+            out.extend(["output", "json"])
+            index += 2
+            continue
         raise UsageError(shape)
     return out
 
@@ -1768,6 +2005,14 @@ def _dispatch(argv: list[str]) -> int:
         if len(argv) != 1:
             raise UsageError("Use: gmail config")
         return _open_config_in_editor()
+    if first == "accounts":
+        if len(argv) < 2 or argv[1] != "list":
+            raise UsageError("Use: gmail accounts list [output json]")
+        return _handle_accounts_list(argv[2:])
+    if first == "setup":
+        if len(argv) < 2 or argv[1] != "check":
+            raise UsageError("Use: gmail setup check [output json]")
+        return _handle_setup_check(argv[2:])
     if first == "spam":
         if argv[1:] != ["clean"]:
             raise UsageError("Use: gmail spam clean")
@@ -1796,6 +2041,8 @@ def _dispatch(argv: list[str]) -> int:
         raise UsageError("Use declarative commands. Run: gmail help")
     if command == "contacts":
         return _handle_contacts(config, account, _parse_contacts_declarative(params))
+    if command == "preview":
+        return _handle_preview(account.email, params, account.contacts)
 
     service = build_gmail_service(account)
     if command == "send":
@@ -1824,6 +2071,9 @@ def _dispatch(argv: list[str]) -> int:
         return _handle_open_message(
             service, open_params, account.email, account.preset, utc_offset=config.timezone_offset
         )
+
+    if command == "inspect":
+        return _handle_inspect_message(service, params, account.email, utc_offset=config.timezone_offset)
 
     if command == "mark":
         if len(params) == 3 and params[0] == "message":

@@ -80,9 +80,79 @@ class MainCommandTests(unittest.TestCase):
         self.assertIn("# spam clean | timer install|disable|status", output)
         self.assertIn("gmail 1 list unread from geeta since 2w limit 10", output)
         self.assertIn("gmail 1 list sent containing proposal since 14d limit 10", output)
+        self.assertIn("gmail accounts list", output)
+        self.assertIn("gmail 1 inspect message", output)
+        self.assertIn("gmail 1 preview send", output)
+        self.assertIn("output json", output)
         self.assertIn("gmail 1 contacts edit", output)
         self.assertNotIn("commands:", output)
         self.assertNotIn("usage:", output)
+
+    def test_accounts_list_output_json(self) -> None:
+        signature = MagicMock()
+        signature.exists.return_value = True
+        account = AccountConfig(
+            preset="1",
+            email="one@example.com",
+            client_secret_file=Path("/tmp/client.json"),
+            signature_file=signature,
+            contacts={"boss": "boss@example.com"},
+        )
+        config = AppConfig(
+            path=Path("/tmp/config.json"),
+            accounts={"1": account},
+            default_list_limit=5,
+        )
+        token_path = MagicMock()
+        token_path.exists.return_value = True
+        with patch("main.load_config", return_value=config), patch(
+            "main.token_file_for_email", return_value=token_path
+        ), patch("sys.stdout", new=StringIO()) as stdout:
+            code = main(["accounts", "list", "output", "json"])
+        self.assertEqual(code, 0)
+        payload = __import__("json").loads(stdout.getvalue())
+        self.assertEqual(payload["accounts"][0]["preset"], "1")
+        self.assertEqual(payload["accounts"][0]["token"], "present")
+
+    def test_preview_send_does_not_build_service(self) -> None:
+        account = AccountConfig(
+            preset="1",
+            email="one@example.com",
+            client_secret_file=Path("/tmp/client.json"),
+            signature_file=Path("/tmp/signature.txt"),
+            contacts={"boss": "boss@example.com"},
+        )
+        config = AppConfig(
+            path=Path("/tmp/config.json"),
+            accounts={"1": account},
+            default_list_limit=5,
+        )
+        with patch("main.load_config", return_value=config), patch("main.build_gmail_service") as build_mock, patch(
+            "sys.stdout", new=StringIO()
+        ) as stdout:
+            code = main(["1", "preview", "send", "to", "boss", "subject", "Hi", "body", "Body"])
+        self.assertEqual(code, 0)
+        build_mock.assert_not_called()
+        self.assertIn("preview_send", stdout.getvalue())
+
+    def test_handle_list_output_json(self) -> None:
+        service = MagicMock()
+        message = {
+            "id": "m1",
+            "threadId": "t1",
+            "payload": {"headers": [{"name": "From", "value": "A <a@example.com>"}, {"name": "Subject", "value": "Hi"}]},
+            "snippet": "hello",
+        }
+        with patch("main.list_messages", return_value=[message]), patch("sys.stdout", new=StringIO()) as stdout:
+            code = _handle_list(
+                service,
+                ["-ur", "-l", "1", "output", "json"],
+                default_limit=10,
+                my_email="me@example.com",
+            )
+        self.assertEqual(code, 0)
+        payload = __import__("json").loads(stdout.getvalue())
+        self.assertEqual(payload["messages"][0]["message_id"], "m1")
 
     def test_help_extra_args_raise_usage_error(self) -> None:
         with self.assertRaises(UsageError) as exc:
